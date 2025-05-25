@@ -1,0 +1,28 @@
+{
+  "$schema": "file:///D:/helios/arius/distro/schemas/ServerMetaSchema.schema.json",
+  "meta": {
+    "version": "1.0.0",
+    "name": "arius (Minecraft 1.20.1)",
+    "description": "arius Running Minecraft 1.20.1 (Forge v47.4.0)",
+    "icon": "https://raw.githubusercontent.com/Skockwave/arius-distro/main/serverIMG.png",
+    "address": "pokeriver.mcv.kr",
+    "discord": {
+      "shortId": "<FILL IN OR REMOVE DISCORD OBJECT>",
+      "largeImageText": "<FILL IN OR REMOVE DISCORD OBJECT>",
+      "largeImageKey": "<FILL IN OR REMOVE DISCORD OBJECT>"
+    },
+    "mainServer": true,
+    "autoconnect": true
+  },
+  "forge": {
+    "version": "47.4.0"
+  },"untrackedFiles": [
+	{
+		"appliesTo": ["files"],
+		"patterns": [
+		  "options.txt",
+		  "servers.dat"
+		]
+	}
+  ]
+}
