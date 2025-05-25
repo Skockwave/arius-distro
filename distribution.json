@@ -12,7 +12,7 @@
       "name": "arius (Minecraft 1.20.1)",
       "description": "arius Running Minecraft 1.20.1 (Forge v47.4.0)",
       "icon": "https://raw.githubusercontent.com/Skockwave/arius-distro/main/serverIMG.png",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "address": "pokeriver.mcv.kr",
       "minecraftVersion": "1.20.1",
       "discord": {
@@ -440,6 +440,26 @@
             "size": 6638739,
             "url": "https://raw.githubusercontent.com/Skockwave/arius-distro/main/servers/arius-1.20.1/libraries/OptiFine_1.20.1_HD_U_I6_MOD.jar",
             "MD5": "c5d21e465a8c3dcabc312ac12ce70007"
+          }
+        },
+        {
+          "id": "options.txt",
+          "name": "options.txt",
+          "type": "File",
+          "artifact": {
+            "size": 3496,
+            "url": "https://raw.githubusercontent.com/Skockwave/arius-distro/main/servers/arius-1.20.1/files/options.txt",
+            "path": "options.txt"
+          }
+        },
+        {
+          "id": "servers.dat",
+          "name": "servers.dat",
+          "type": "File",
+          "artifact": {
+            "size": 132,
+            "url": "https://raw.githubusercontent.com/Skockwave/arius-distro/main/servers/arius-1.20.1/files/servers.dat",
+            "path": "servers.dat"
           }
         }
       ]
