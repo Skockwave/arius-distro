@@ -16,7 +16,9 @@ host uses one, put the real port in ``minecraft.port``.
 from __future__ import annotations
 
 import json
+import ntpath as _ntpath
 import os as _os
+import posixpath as _posixpath
 import re as _re
 import socket
 import struct
@@ -354,15 +356,22 @@ def find_server_processes(run=None) -> list[ServerProcess]:
     found: list[ServerProcess] = []
     try:
         if _sys.platform == "win32":
+            # Windows has no /proc/<pid>/cwd. A relative "-jar paper.jar" says nothing about the
+            # folder, but the start.bat that launched the JVM (its parent cmd.exe) usually does,
+            # so the parent's command line rides along as the third field.
             ps = (
-                "Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'java*' } | "
-                "ForEach-Object { '{0}|{1}|{2}' -f $_.ProcessId, [math]::Round($_.WorkingSetSize/1MB), $_.CommandLine }"
+                "Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'java*' } | ForEach-Object { "
+                "$pp = Get-CimInstance Win32_Process -Filter ('ProcessId = ' + $_.ParentProcessId); "
+                "'{0}|{1}|{2}|{3}' -f $_.ProcessId, [math]::Round($_.WorkingSetSize/1MB), "
+                "(('' + $pp.CommandLine) -replace '\\|', '/'), $_.CommandLine }"
             )
             out = run(["powershell", "-NoProfile", "-Command", ps]).stdout
             for line in out.splitlines():
-                parts = line.split("|", 2)
-                if len(parts) == 3 and _looks_like_server(parts[2]):
-                    found.append(ServerProcess(int(parts[0]), parts[2].strip(), float(parts[1] or 0), _guess_cwd(parts[2])))
+                parts = line.split("|", 3)
+                if len(parts) == 3:  # pid|mem|cmdline (no parent info)
+                    parts = [parts[0], parts[1], "", parts[2]]
+                if len(parts) == 4 and _looks_like_server(parts[3]):
+                    found.append(ServerProcess(int(parts[0]), parts[3].strip(), float(parts[1] or 0), _guess_cwd(parts[3], parts[2])))
         else:
             out = run(["ps", "-eo", "pid=,rss=,args="]).stdout
             for line in out.splitlines():
@@ -380,11 +389,27 @@ def find_server_processes(run=None) -> list[ServerProcess]:
     return found
 
 
-def _guess_cwd(cmdline: str) -> str:
-    m = _re.search(r"-jar\s+\"?([^\s\"]+\.jar)", cmdline, _re.IGNORECASE)
-    if m and _os.path.isabs(m.group(1)):
-        return _os.path.dirname(m.group(1))
+def _guess_cwd(cmdline: str, parent_cmdline: str = "") -> str:
+    """The server folder from an absolute -jar path, else from the start.bat/.cmd/.sh that the
+    parent shell is running (`cmd.exe /c ""C:\\Servers\\meteno\\start.bat" "`), else ''."""
+    m = _re.search(r"-jar\s+(?:\"([^\"]+\.jar)\"|(\S+\.jar))", cmdline, _re.IGNORECASE)
+    jar = (m.group(1) or m.group(2)) if m else ""
+    if jar and (_ntpath.isabs(jar) or _posixpath.isabs(jar)):
+        return _dirname(jar)
+    parent = parent_cmdline or ""
+    m = _re.search(r"\"((?:[A-Za-z]:[\\/]|/)[^\"]*?\.(?:bat|cmd|sh))\"", parent, _re.IGNORECASE)  # quoted (spaces ok)
+    if not m:
+        m = _re.search(r"((?:[A-Za-z]:[\\/]|/)\S*?\.(?:bat|cmd|sh))(?=\s|$)", parent, _re.IGNORECASE)  # bare path
+    if m:
+        return _dirname(m.group(1))
     return ""
+
+
+def _dirname(path: str) -> str:
+    """dirname that understands Windows paths wherever it runs (tests on Linux, WSL)."""
+    if _re.match(r"[A-Za-z]:[\\/]", path) or "\\" in path:
+        return _ntpath.dirname(path)
+    return _posixpath.dirname(path)
 
 
 def detect_server_dir(configured: str = "", processes: list[ServerProcess] | None = None) -> str:

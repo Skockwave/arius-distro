@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 import zipfile
@@ -254,6 +255,7 @@ def t_mc_command(ctx: ToolContext, args: dict) -> str:
             out = r.command(cmd)
     except mc.RconError as exc:
         return str(exc)
+    out = re.sub(r"§.", "", out)  # Bukkit colour codes mean nothing in a console reply
     return _clip(out or "(출력 없음)")
 
 

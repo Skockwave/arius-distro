@@ -183,3 +183,43 @@ def test_wake_word_detection_and_awake_window():
     assert vc.handle_utterance("자비스") == "네, 말씀하세요."       # called -> ack, now awake
     assert vc.handle_utterance("서버 켜져 있어?") == "답: 서버 켜져 있어?"  # follow-up without name
     assert tts.spoken[-1] == "답: 서버 켜져 있어?"
+
+
+# --- local server discovery ----------------------------------------------------------------
+
+
+def test_guess_cwd_from_absolute_jar_or_launching_batch_file():
+    from arius.minecraft import _guess_cwd
+
+    assert _guess_cwd("java -jar C:\\Servers\\meteno\\paper.jar nogui") == "C:\\Servers\\meteno"
+    assert _guess_cwd('java -Xmx4G -jar "C:\\My Server\\paper.jar" nogui') == "C:\\My Server"
+    assert _guess_cwd("/usr/bin/java -jar /srv/mc/paper.jar") == "/srv/mc"
+    # relative jar (the usual start.bat): the parent shell's batch file names the folder
+    parent = 'C:\\Windows\\system32\\cmd.exe /c ""C:\\Servers\\meteno\\start.bat" "'
+    assert _guess_cwd("java -Xmx4G -jar paper.jar nogui", parent) == "C:\\Servers\\meteno"
+    assert _guess_cwd("java -jar paper.jar", "bash /home/me/server/start.sh") == "/home/me/server"
+    assert _guess_cwd("java -jar paper.jar", "cmd.exe") == ""
+    assert _guess_cwd("java -jar paper.jar") == ""
+
+
+def test_find_server_processes_on_windows_reads_parent_batch_folder(monkeypatch):
+    import sys
+
+    from arius.minecraft import find_server_processes
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    lines = [
+        '4321|1500|C:\\Windows\\system32\\cmd.exe /c ""C:\\Servers\\meteno\\start.bat" "|java -Xmx4G -jar paper.jar nogui',
+        "999|20||javaw -jar C:\\Games\\launcher.jar",  # not a server jar
+        "777|900|C:\\Servers\\other\\paper.jar",  # legacy 3-field line, absolute jar without -jar: ignored
+        "555|800|cmd.exe /c C:\\Servers\\old\\run.bat|java -jar spigot.jar",
+        "not a line",
+    ]
+    calls = []
+    run = lambda args, **kw: calls.append(args) or type("R", (), {"stdout": "\n".join(lines)})()  # noqa: E731
+    procs = find_server_processes(run)
+    assert calls and calls[0][0] == "powershell" and "ParentProcessId" in calls[0][-1]
+    assert [(p.pid, p.memory_mb, p.cwd) for p in procs] == [
+        (4321, 1500.0, "C:\\Servers\\meteno"),
+        (555, 800.0, "C:\\Servers\\old"),
+    ]

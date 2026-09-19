@@ -481,3 +481,81 @@ def test_backend_switch_writes_config_and_diagnoses(monkeypatch, capsys):
         assert cfg.llm.backend == "anthropic" and cfg.llm.model.startswith("claude")
         assert cli.main(["-c", str(path), "backend", "echo"]) == 0
         assert _coerce(json.loads(path.read_text(encoding="utf-8"))).llm.backend == "echo"
+
+
+# --- regressions found while running the charter build on a live setup ----------------------
+
+
+def test_inspection_without_rcon_password_keeps_the_friendly_tps_hint():
+    """Server online but no RCON password: step 3 must say how to enable it, not dump a truncated
+    internal tool message."""
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "server.properties").write_text("level-name=world\n")
+        a, _ = make(tmp=tmp, rcon=False)
+        r = a.handle("서버 점검해")
+        assert "3. TPS: RCON 미설정 — 'RCON 설정: <암호>' 후 확인 가능" in r.text
+        assert "minecraft_enable_rcon" not in r.text
+
+
+def test_inspection_reports_unreachable_rcon_as_a_warning():
+    from arius.minecraft import RconError
+
+    class Broken:
+        def __enter__(self):
+            raise RconError("RCON 연결 실패 (localhost:25575): refused")
+
+        def __exit__(self, *a):
+            pass
+
+    a, _ = make()
+    ctx = a.tool_context()
+    ctx.rcon_factory = lambda h, p, pw: Broken()
+    a.tool_context = lambda session=None, _c=ctx: _c  # type: ignore[method-assign]
+    r = a.handle("서버 점검해")
+    assert "3. TPS: 🟡 확인 불가 — RCON 연결 실패" in r.text and "🟡 주의:" in r.text and "TPS 확인 불가" in r.text
+
+
+def test_console_command_reply_drops_bukkit_colour_codes():
+    a, _ = make()
+    ctx = a.tool_context()
+    ctx.rcon_factory = lambda h, p, pw: FakeRcon({"tps": "§6TPS from last 1m, 5m, 15m: §a19.8, §a19.9, §a20.0"})
+    out = build_registry()["minecraft_command"].handler(ctx, {"command": "tps"})
+    assert out == "TPS from last 1m, 5m, 15m: 19.8, 19.9, 20.0"
+
+
+def test_voice_conversation_reports_a_service_error_once_and_keeps_listening():
+    import threading
+
+    events = []
+    stop = threading.Event()
+
+    class Stt:
+        available = True
+        reason = None
+        calls = 0
+
+        def listen(self):
+            self.calls += 1
+            self.reason = "음성 인식 서비스 오류: recognition connection failed"
+            if self.calls >= 3:
+                stop.set()
+            return None
+
+    tts = TextToSpeech(backend=None)
+    VoiceConversation(Stt(), tts, lambda q: "답", ["자비스"], on_event=events.append).run(stop)
+    assert events[0].startswith("듣는 중…")
+    assert events.count("음성 인식 서비스 오류: recognition connection failed") == 1  # said once, not every loop
+
+
+def test_voice_conversation_stops_on_microphone_failure():
+    events = []
+
+    class Stt:
+        available = True
+        reason = "마이크를 열 수 없습니다: no default input device (마이크 연결과 OS 마이크 권한을 확인하십시오)"
+
+        def listen(self):
+            return None
+
+    VoiceConversation(Stt(), TextToSpeech(backend=None), lambda q: "답", ["자비스"], on_event=events.append).run()
+    assert events[-1].startswith("마이크를 열 수 없습니다")

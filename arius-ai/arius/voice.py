@@ -303,12 +303,18 @@ class VoiceConversation:
     def run(self, stop_event: _threading.Event | None = None) -> None:
         stop_event = stop_event or _threading.Event()
         self.on_event(f"듣는 중… '{', '.join(self.wake_words)}' 라고 부르면 대답합니다. (Ctrl+C 로 종료)")
+        reported: str | None = None
         while not stop_event.is_set():
             heard = self.stt.listen()
             if heard is None:
-                if self.stt.reason and "마이크" in self.stt.reason:
-                    self.on_event(self.stt.reason)
+                reason = self.stt.reason
+                if reason and "마이크" in reason:
+                    self.on_event(reason)
                     return
+                if reason and reason != reported:
+                    # e.g. the speech service is unreachable (no internet): say so once, keep listening
+                    self.on_event(reason)
+                    reported = reason
                 continue
             if not heard:
                 self.handle_unclear()
