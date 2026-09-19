@@ -536,6 +536,8 @@ pip install pytest
 python -m pytest -q
 ```
 
+GitHub Actions(`.github/workflows/ci.yml`)가 `arius-ai/` 를 건드리는 모든 푸시와 PR에서 같은 테스트를 Python 3.10 / 3.11 / 3.12 로 자동 실행하고, ruff 로 문법 오류·미정의 이름을 검사합니다.
+
 ---
 
 ## 운영 규칙 (자비스 사양)
