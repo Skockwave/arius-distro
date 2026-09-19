@@ -180,6 +180,6 @@ def test_wake_word_detection_and_awake_window():
     assert vc.detect_wake("아리 우스, 서버 상태 어때?") == (True, "서버 상태 어때")
     assert vc.detect_wake("오늘 날씨 어때")[0] is False
     assert vc.handle_utterance("오늘 날씨 어때") is None          # asleep, not addressed
-    assert vc.handle_utterance("자비스") == "네, 듣고 있어요."       # called -> ack, now awake
+    assert vc.handle_utterance("자비스") == "네, 말씀하세요."       # called -> ack, now awake
     assert vc.handle_utterance("서버 켜져 있어?") == "답: 서버 켜져 있어?"  # follow-up without name
     assert tts.spoken[-1] == "답: 서버 켜져 있어?"

@@ -25,7 +25,9 @@ from arius.agent.loop import AUTONOMY_LEVELS
 from arius.discord import DiscordBot, DiscordError
 from arius.discord_chat import DiscordChat
 from arius.memory import Memory
+from arius.modes import get_mode, parse_mode
 from arius.permissions import Role, Session, User
+from arius.privacy import redact
 
 BANNER = r"""
    _   ___ ___ _   _ ___
@@ -37,8 +39,13 @@ BANNER = r"""
 HELP_COMMANDS = (
     "세션:   /login <아이디>, /logout, /quit\n"
     "음성:   /voice on|off (읽어주기), /listen (한 문장 입력), /wake (이름 부르면 대답하는 대화 모드)\n"
+    "모드:   /mode 빠른|정확|학습|점검|절전  (또는 '점검 모드', '현재 모드', '학습 보고')\n"
+    "점검:   '서버 점검해' (온라인·접속자·TPS·CPU/RAM·디스크·오류·백업), 'PC 점검', '전체 점검'\n"
+    "서버:   서버 상태 / 서버 로그 오류 / tps / 화이트리스트 / 운영자 목록 / 밴 목록 / 서버 백업 / 백업 상태 / 서버 재시작(확인)\n"
+    "PC:     '유튜브 열어줘', '메모장 실행해', '다운로드 폴더 열어', '창 전환: 크롬', '실행 중인 프로그램', '프로그램 종료: notepad'(확인)\n"
+    "기억:   기억해: … / 기억 목록 / 기억 삭제: … / 내 정보를 모두 잊어\n"
     "에이전트: /agent run [할 일] | on | off | log | autonomy observe|supervised|autonomous\n"
-    "        정책 추가: <규칙> / 정책 목록 / 정책 삭제 <번호>,  자유 요청은 '…해줘' 또는 '작업: …'\n"
+    "        정책 추가: <규칙> / 정책 목록 / 자동 허용 목록 / 자동 허용 추가: <도구>,  자유 요청은 '…해줘' 또는 '작업: …'\n"
     "디스코드: /discord on|off (채널 대화 모드), 공지 초안: … / 공지 전송: …\n"
     "기타:   /reindex (기억 벡터 재색인), /help (기능 목록)"
 )
@@ -217,7 +224,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(BANNER)
     logged_in = False if args.no_autologin else _startup_login(arius)
     print(f"{cfg.assistant_name} 준비 완료. 백엔드: {arius.backend.name}, 임베딩: {arius.embedder.name}, "
-          f"에이전트: {cfg.agent.autonomy}. 현재 사용자: {arius.current_user_label}.")
+          f"에이전트: {cfg.agent.autonomy}, 모드: {get_mode(arius.current_mode()).label}. 현재 사용자: {arius.current_user_label}.")
     if not logged_in:
         owners = [u.username for u in arius.permissions.users() if u.role is Role.OWNER]
         hint = f"/login {owners[0]}" if owners else "config.json 의 users 에 role=owner 계정을 추가"
@@ -230,15 +237,30 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     def confirm(desc: str) -> bool:
         try:
-            ans = input(f"\n[에이전트] 실행할까요? {desc}\n  (y = 실행 / 그 외 = 거부) › ").strip().lower()
+            ans = input(f"\n[{cfg.assistant_name}] {desc}\n  (y = 실행 / 그 외 = 거부) › ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             return False
-        return ans in ("y", "yes", "ㅇ", "네", "예", "응")
+        return ans in ("y", "yes", "ㅇ", "네", "예", "응", "진행", "ㄱ")
 
     arius.notify = event
     arius.confirm = confirm
     heartbeat: Heartbeat | None = None
     discord_chat: DiscordChat | None = None
+
+    def on_mode_change(key: str) -> None:
+        nonlocal heartbeat
+        if key == "sleep":
+            if heartbeat and heartbeat.running:
+                heartbeat.stop()
+                print("절전 모드: 하트비트를 멈췄습니다.")
+        elif cfg.agent.enabled or (heartbeat is not None and not heartbeat.running and heartbeat.last_run):
+            if heartbeat is None:
+                heartbeat = _make_heartbeat(arius, event)
+            if not heartbeat.running:
+                heartbeat.start()
+                print(f"하트비트 재개 (매 {cfg.agent.interval_minutes}분).")
+
+    arius.on_mode_change = on_mode_change
 
     if args.voice or cfg.voice.enabled:
         print(voice.enable_speech())
@@ -358,6 +380,19 @@ def cmd_run(args: argparse.Namespace) -> int:
         if line == "/wake":
             _wake_conversation(arius, voice, event)
             continue
+        if line.startswith("/mode"):
+            arg = line.split(maxsplit=1)[1].strip() if " " in line else ""
+            if not arg:
+                reply = arius.handle("현재 모드")
+                _print_reply(cfg.assistant_name, reply.text)
+                continue
+            if parse_mode(arg) is None:
+                print("사용법: /mode 빠른|정확|학습|점검|절전")
+                continue
+            reply = arius.handle(f"/mode {arg}")
+            _print_reply(cfg.assistant_name, reply.text)
+            voice.say(reply.text)
+            continue
         if line == "/commands":
             print(HELP_COMMANDS)
             continue
@@ -387,7 +422,7 @@ def _log_line(cfg: AriusConfig, line: str) -> None:
         if path.exists() and path.stat().st_size > 5_000_000:
             path.write_text("", encoding="utf-8")
         with open(path, "a", encoding="utf-8") as fh:
-            fh.write(line + "\n")
+            fh.write(redact(line) + "\n")
     except OSError:
         pass
 
@@ -529,7 +564,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         return 1
 
     print("ARIUS 초기 설정을 시작합니다.\n")
-    assistant_name = input("비서 이름 [ARIUS]: ").strip() or "ARIUS"
+    assistant_name = input("비서 이름(호출어) [자비스]: ").strip() or "자비스"
     owner_username = input("오너 아이디 [owner]: ").strip() or "owner"
     owner_display = input(f"오너 표시 이름 [{owner_username}]: ").strip() or owner_username
 
@@ -569,8 +604,9 @@ def cmd_init(args: argparse.Namespace) -> int:
                 passphrase_hash=passphrase_hash,
             )
         ],
-        default_user="guest",
+        default_user=owner_username,
     )
+    config.voice.wake_words = [assistant_name]
     if choice == "2":
         config.llm.backend = "anthropic"
     elif choice == "3":

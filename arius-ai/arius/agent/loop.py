@@ -125,12 +125,33 @@ class AgentLoop:
             return True, ""
         if self.autonomy == "observe":
             return False, f"observe 모드에서는 '{tool.name}' 같은 변경 도구를 쓸 수 없습니다."
-        if self.autonomy == "autonomous" and tool.name in self.auto_allow:
+        # Per-call "always ask" (kick/ban/op...) beats auto_allow; danger tools run unasked only
+        # when the owner listed them explicitly.
+        must_ask = bool(tool.confirm_if and tool.confirm_if(self.ctx, args))
+        if self.autonomy == "autonomous" and tool.name in self.auto_allow and not must_ask:
             return True, ""
-        desc = f"{tool.name} {json.dumps(args, ensure_ascii=False)}"
-        if not self.confirm(desc):
+        desc = f"실행 예정: {tool.describe(args)}\n영향: {tool.impact_text()}\n진행할까요?"
+        approved = bool(self.confirm(desc))
+        self._learn_decision(tool, args, approved)
+        if not approved:
             return False, "사용자가 실행을 거부했습니다(또는 승인할 사람이 없음)."
         return True, ""
+
+    def _learn_decision(self, tool: Tool, args: dict, approved: bool) -> None:
+        """Behaviour learning: remember what the user approves; after three clean approvals of a
+        non-dangerous tool, suggest adding it to auto_allow (never applied on its own)."""
+        try:
+            self.ctx.memory.record_approval(tool.name, _short(args, 120), approved)
+            if not approved or tool.risk == "danger" or tool.name in self.auto_allow:
+                return
+            yes, no = self.ctx.memory.approval_stats(tool.name)
+            if yes == 3 and no == 0:
+                self.on_event(
+                    f"학습: '{tool.name}' 작업을 최근 3번 모두 승인하셨어요. 다음부터 묻지 않고 실행하려면 "
+                    f"'자동 허용 추가: {tool.name}' 이라고 말해 주세요. (승인 없이는 바꾸지 않습니다)"
+                )
+        except Exception:  # learning must never break the gate
+            pass
 
     def run(self, goal: str, context_note: str = "") -> AgentResult:
         result = AgentResult(final="")

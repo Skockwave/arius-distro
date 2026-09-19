@@ -22,14 +22,17 @@ import re
 import shutil
 import subprocess
 
+from arius.privacy import looks_secret, redact
+
 _BULLETS = re.compile(r"^\s*[•\-\*▪◦]\s*", re.MULTILINE)
 _PAREN_NOTE = re.compile(r"\((?:참고|알림)[^)]*\)")
 _URL = re.compile(r"https?://\S+")
 
 
 def speakable(text: str, limit: int = 400) -> str:
-    """Turn a reply into something pleasant to hear: no bullets, notes, URLs."""
-    t = _PAREN_NOTE.sub("", text)
+    """Turn a reply into something pleasant to hear: no bullets, notes, URLs — and no secrets."""
+    t = redact(text) if looks_secret(text) else text
+    t = _PAREN_NOTE.sub("", t)
     t = _URL.sub("링크", t)
     t = _BULLETS.sub("", t)
     t = re.sub(r"[`*_#>|]", "", t)
@@ -242,7 +245,8 @@ class VoiceConversation:
         *,
         awake_seconds: int = 20,
         on_event: _Callable[[str], None] | None = None,
-        ack_phrase: str = "네, 듣고 있어요.",
+        ack_phrase: str = "네, 말씀하세요.",
+        unclear_phrase: str = "잘 듣지 못했습니다. 다시 말씀해 주시겠어요?",
     ) -> None:
         self.stt = stt
         self.tts = tts
@@ -251,6 +255,7 @@ class VoiceConversation:
         self.awake_seconds = max(0, int(awake_seconds))
         self.on_event = on_event or (lambda m: None)
         self.ack_phrase = ack_phrase
+        self.unclear_phrase = unclear_phrase
         self._awake_until = 0.0
 
     def detect_wake(self, heard: str) -> tuple[bool, str]:
@@ -269,6 +274,15 @@ class VoiceConversation:
     @property
     def awake(self) -> bool:
         return _time.monotonic() < self._awake_until
+
+    def handle_unclear(self) -> str | None:
+        """Speech was heard but not understood. While awake, ask to repeat instead of guessing."""
+        if not self.awake:
+            return None
+        self._awake_until = _time.monotonic() + self.awake_seconds
+        self.on_event("잘 듣지 못함 — 다시 요청")
+        self.tts.speak(self.unclear_phrase)
+        return self.unclear_phrase
 
     def handle_utterance(self, heard: str) -> str | None:
         """One transcript in → spoken reply (or None if it was not for us)."""
@@ -298,6 +312,7 @@ class VoiceConversation:
                     return
                 continue
             if not heard:
+                self.handle_unclear()
                 continue
             try:
                 self.handle_utterance(heard)

@@ -92,8 +92,27 @@ class AgentConfig:
     )
     # Console commands the agent may send over RCON (first word). Everything else is refused.
     rcon_allow: list[str] = field(
-        default_factory=lambda: ["list", "tps", "save-all", "say", "tell", "msg", "whitelist", "kick", "time", "weather", "seed", "version", "plugins"]
+        default_factory=lambda: [
+            "list", "tps", "save-all", "say", "tell", "msg", "whitelist", "banlist", "kick", "ban", "pardon",
+            "op", "deop", "time", "weather", "seed", "version", "plugins",
+        ]
     )
+    # Console commands that ALWAYS ask the user first, even in autonomous mode and even
+    # when minecraft_command is in auto_allow (player kicks/bans, op changes, whitelist removal).
+    rcon_confirm: list[str] = field(
+        default_factory=lambda: [
+            "kick", "ban", "ban-ip", "pardon", "pardon-ip", "op", "deop", "whitelist remove", "whitelist off",
+            "stop", "restart", "difficulty", "gamemode", "gamerule",
+        ]
+    )
+    # Operating mode at startup: "fast" | "accurate" | "learn" | "inspect" | "sleep" (see arius/modes.py).
+    default_mode: str = "accurate"
+    # Built-in health alerts (no policy needed): thresholds in percent / hours.
+    alert_disk_pct: int = 90
+    alert_memory_pct: int = 92
+    alert_cpu_pct: int = 95
+    alert_log_errors: int = 5  # repeated ERROR lines in the recent log
+    alert_backup_hours: int = 48  # newest backup older than this
 
 
 @dataclass
@@ -110,6 +129,9 @@ class MinecraftConfig:
     rcon_password_env: str = "ARIUS_RCON_PASSWORD"
     distribution_path: str = "../distribution.json"
     start_command: str = ""  # optional: how to start the server on this machine
+    backup_dir: str = ""  # where world backups (.zip) go; empty = <server_dir>/backups
+    restart_notice_seconds: int = 300  # warn players this long before a planned restart
+    restart_notice: str = "서버가 약 5분 후 재시작됩니다. 안전한 곳으로 이동해 주세요."
 
     @property
     def resolved_rcon_password(self) -> str:
@@ -142,6 +164,22 @@ class DiscordConfig:
 
 
 @dataclass
+class DesktopConfig:
+    """PC control: launching/closing programs, opening files, folders and websites.
+
+    Only *named* programs (below, plus a few OS built-ins) can be launched, and
+    closing a program always asks first. Protected processes are never closed."""
+
+    programs: dict[str, str] = field(default_factory=dict)  # "크롬": "start chrome" or a full path
+    sites: dict[str, str] = field(default_factory=dict)  # "유튜브": "https://youtube.com"
+    folders: dict[str, str] = field(default_factory=dict)  # "작업 폴더": "D:/work"
+    allow_any_url: bool = True  # false = only the sites above may be opened
+    protected_processes: list[str] = field(
+        default_factory=lambda: ["java", "javaw", "explorer", "system", "csrss", "winlogon", "wininit", "lsass", "svchost", "python", "pythonw"]
+    )
+
+
+@dataclass
 class UserConfig:
     """A person the assistant recognizes."""
 
@@ -167,6 +205,7 @@ class AriusConfig:
     agent: AgentConfig = field(default_factory=AgentConfig)
     minecraft: MinecraftConfig = field(default_factory=MinecraftConfig)
     discord: DiscordConfig = field(default_factory=DiscordConfig)
+    desktop: DesktopConfig = field(default_factory=DesktopConfig)
     users: list[UserConfig] = field(default_factory=list)
     # Account to log in at startup. Empty = the first owner; a name = that account.
     default_user: str = ""
@@ -201,15 +240,18 @@ def _coerce(data: dict[str, Any]) -> AriusConfig:
     discord = DiscordConfig(
         **{k: v for k, v in (data.get("discord") or {}).items() if k in DiscordConfig.__dataclass_fields__}
     )
+    desktop = DesktopConfig(
+        **{k: v for k, v in (data.get("desktop") or {}).items() if k in DesktopConfig.__dataclass_fields__}
+    )
     users = [
         UserConfig(**{k: v for k, v in u.items() if k in UserConfig.__dataclass_fields__})
         for u in (data.get("users") or [])
     ]
-    nested = {"llm", "persona", "users", "embeddings", "voice", "agent", "minecraft", "discord"}
+    nested = {"llm", "persona", "users", "embeddings", "voice", "agent", "minecraft", "discord", "desktop"}
     top = {k: v for k, v in data.items() if k in AriusConfig.__dataclass_fields__ and k not in nested}
     return AriusConfig(
         llm=llm, persona=persona, embeddings=embeddings, voice=voice,
-        agent=agent, minecraft=minecraft, discord=discord, users=users, **top,
+        agent=agent, minecraft=minecraft, discord=discord, desktop=desktop, users=users, **top,
     )
 
 
@@ -295,6 +337,13 @@ def config_to_dict(config: AriusConfig) -> dict[str, Any]:
             "read_paths": list(config.agent.read_paths),
             "auto_allow": list(config.agent.auto_allow),
             "rcon_allow": list(config.agent.rcon_allow),
+            "rcon_confirm": list(config.agent.rcon_confirm),
+            "default_mode": config.agent.default_mode,
+            "alert_disk_pct": config.agent.alert_disk_pct,
+            "alert_memory_pct": config.agent.alert_memory_pct,
+            "alert_cpu_pct": config.agent.alert_cpu_pct,
+            "alert_log_errors": config.agent.alert_log_errors,
+            "alert_backup_hours": config.agent.alert_backup_hours,
         },
         "minecraft": {
             "name": config.minecraft.name,
@@ -307,6 +356,9 @@ def config_to_dict(config: AriusConfig) -> dict[str, Any]:
             "rcon_password_env": config.minecraft.rcon_password_env,
             "distribution_path": config.minecraft.distribution_path,
             "start_command": config.minecraft.start_command,
+            "backup_dir": config.minecraft.backup_dir,
+            "restart_notice_seconds": config.minecraft.restart_notice_seconds,
+            "restart_notice": config.minecraft.restart_notice,
         },
         "discord": {
             "webhook_url": config.discord.webhook_url,
@@ -319,6 +371,13 @@ def config_to_dict(config: AriusConfig) -> dict[str, Any]:
             "chat_mention_only": config.discord.chat_mention_only,
             "chat_role": config.discord.chat_role,
             "poll_seconds": config.discord.poll_seconds,
+        },
+        "desktop": {
+            "programs": dict(config.desktop.programs),
+            "sites": dict(config.desktop.sites),
+            "folders": dict(config.desktop.folders),
+            "allow_any_url": config.desktop.allow_any_url,
+            "protected_processes": list(config.desktop.protected_processes),
         },
         "users": [
             {

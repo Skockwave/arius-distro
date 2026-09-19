@@ -1,5 +1,5 @@
 {
-  "assistant_name": "ARIUS",
+  "assistant_name": "자비스",
   "language": "ko",
   "data_dir": "~/.arius",
   "default_user": "owner",
@@ -30,8 +30,8 @@
     "rate": 180,
     "voice_name": "",
     "wake_words": [
-      "아리우스",
-      "자비스"
+      "자비스",
+      "아리우스"
     ],
     "awake_seconds": 20
   },
@@ -63,13 +63,40 @@
       "tell",
       "msg",
       "whitelist",
+      "banlist",
       "kick",
+      "ban",
+      "pardon",
+      "op",
+      "deop",
       "time",
       "weather",
       "seed",
       "version",
       "plugins"
-    ]
+    ],
+    "rcon_confirm": [
+      "kick",
+      "ban",
+      "ban-ip",
+      "pardon",
+      "pardon-ip",
+      "op",
+      "deop",
+      "whitelist remove",
+      "whitelist off",
+      "stop",
+      "restart",
+      "difficulty",
+      "gamemode",
+      "gamerule"
+    ],
+    "default_mode": "accurate",
+    "alert_disk_pct": 90,
+    "alert_memory_pct": 92,
+    "alert_cpu_pct": 95,
+    "alert_log_errors": 5,
+    "alert_backup_hours": 48
   },
   "minecraft": {
     "name": "메테노서버",
@@ -81,7 +108,10 @@
     "rcon_password": "",
     "rcon_password_env": "ARIUS_RCON_PASSWORD",
     "distribution_path": "../distribution.json",
-    "start_command": ""
+    "start_command": "",
+    "backup_dir": "",
+    "restart_notice_seconds": 300,
+    "restart_notice": "서버가 약 5분 후 재시작됩니다. 안전한 곳으로 이동해 주세요."
   },
   "discord": {
     "webhook_url": "",
@@ -94,6 +124,34 @@
     "chat_mention_only": true,
     "chat_role": "user",
     "poll_seconds": 4
+  },
+  "desktop": {
+    "programs": {
+      "크롬": "start chrome",
+      "디스코드": "start discord://",
+      "메테노서버 폴더": "explorer C:\\\\Servers\\\\meteno"
+    },
+    "sites": {
+      "메테노 위키": "https://minecraft.wiki",
+      "유튜브": "https://www.youtube.com"
+    },
+    "folders": {
+      "서버 폴더": "C:/Servers/meteno"
+    },
+    "allow_any_url": true,
+    "protected_processes": [
+      "java",
+      "javaw",
+      "explorer",
+      "system",
+      "csrss",
+      "winlogon",
+      "wininit",
+      "lsass",
+      "svchost",
+      "python",
+      "pythonw"
+    ]
   },
   "users": [
     {

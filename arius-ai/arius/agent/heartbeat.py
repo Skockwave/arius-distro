@@ -11,12 +11,14 @@ import threading
 import time
 from collections.abc import Callable
 
+from arius import minecraft as mc
 from arius import sysinfo
 from arius.agent.loop import AgentLoop
 from arius.agent.tools import SYSTEM_USER, ToolContext
 from arius.discord import DiscordError, format_announcement
 
 _PCT = re.compile(r"(\d{2,3})\s*%")
+_ALERTS_KEY = "alerts.active"
 
 
 class Heartbeat:
@@ -58,6 +60,11 @@ class Heartbeat:
         if transition:
             note += f"\n이벤트: {transition}"
             self.on_event(transition)
+        alerts = self.health_alerts(snap, status)
+        for a in self._new_alerts(alerts):
+            self.on_event(a)
+        if alerts:
+            note += "\n감지된 문제:\n" + "\n".join(f"- {a}" for a in alerts)
 
         loop = self.loop_factory()
         if loop.backend.name == "echo":
@@ -74,6 +81,49 @@ class Heartbeat:
         self.last_report = report
         self.ctx.memory.log_agent("heartbeat", (report.splitlines() or ["(빈 보고)"])[0][:200], report)
         return report
+
+    # -- built-in health checks (no policy needed) -----------------------------
+    def health_alerts(self, snap: dict, status) -> list[str]:
+        """Disk / memory / CPU / repeated log errors / stale backup, each with cause → impact → action."""
+        a = self.ctx.config.agent
+        out: list[str] = []
+        for d in snap.get("disks", []):
+            if d.get("used_pct", 0) >= a.alert_disk_pct:
+                out.append(f"⚠️ 디스크 {d['path']} {d['used_pct']}% 사용 (여유 {d.get('free_gb', '?')}GB) — 원인: 용량 부족 / 영향: 월드 저장·백업 실패 가능 / 권장: 다운로드·백업 폴더 정리 제안")
+        mem = snap.get("memory", {})
+        if mem.get("used_pct", 0) >= a.alert_memory_pct:
+            out.append(f"⚠️ 메모리 {mem['used_pct']}% 사용 — 원인: 프로그램 과다 / 영향: 렉·서버 지연 / 권장: 상위 프로세스 확인 후 종료 여부 결정")
+        load = (snap.get("cpu") or {}).get("load_pct")
+        if load is not None and load >= a.alert_cpu_pct:
+            out.append(f"⚠️ CPU 부하 {load}% — 원인: 무거운 작업 / 영향: 서버 TPS 저하 / 권장: 작업 관리자에서 원인 확인")
+        sd = self.ctx.server_dir()
+        if sd and status.online:
+            errors = mc.tail_log(sd, 200, r"\bERROR\b|Exception")
+            n = 0 if errors.startswith(("(", "로그")) else len(errors.splitlines())
+            if n >= a.alert_log_errors:
+                out.append(f"⚠️ 서버 로그에 오류 {n}건 반복 — 원인: 플러그인/모드 예외 가능 / 영향: 기능 오류·크래시 위험 / 권장: '서버 로그 오류' 로 확인")
+        latest = self.ctx.latest_backup()
+        bdir = self.ctx.backup_dir()
+        if latest is not None:
+            age_h = (time.time() - latest.stat().st_mtime) / 3600
+            if age_h > a.alert_backup_hours:
+                out.append(f"⚠️ 최근 백업이 {age_h:.0f}시간 전 ({latest.name}) — 영향: 장애 시 복구 지점 오래됨 / 권장: '서버 백업'")
+        elif bdir is not None and bdir.is_dir():
+            out.append("⚠️ 백업 폴더에 zip 백업이 없습니다 — 권장: '서버 백업'")
+        return out
+
+    def _new_alerts(self, alerts: list[str]) -> list[str]:
+        """Only announce an alert when it first appears (state kept in memory), so a 10-minute
+        heartbeat does not repeat the same warning all day."""
+        keys = {a.split(" — ")[0] for a in alerts}
+        prev_raw = {f.key: f.value for f in self.ctx.memory.list_facts(SYSTEM_USER)}.get(_ALERTS_KEY, "")
+        prev = set(prev_raw.split("\x1f")) if prev_raw else set()
+        if keys != prev:
+            if keys:
+                self.ctx.memory.learn_fact(SYSTEM_USER, _ALERTS_KEY, "\x1f".join(sorted(keys)), source="system")
+            else:
+                self.ctx.memory.forget_fact(SYSTEM_USER, _ALERTS_KEY)
+        return [a for a in alerts if a.split(" — ")[0] not in prev]
 
     # -- offline rule engine (no LLM): thresholds and server-down policies only
     def _rules(self, snap: dict, status, transition: str, loop: AgentLoop) -> str:

@@ -119,7 +119,7 @@ def test_rcon_allowlist_and_missing_password():
     cfg, mem, session, ctx = make_ctx()
     tools = build_registry()
     try:
-        tools["minecraft_command"].handler(ctx, {"command": "op steve"})
+        tools["minecraft_command"].handler(ctx, {"command": "execute as @a run kill"})
         assert False, "should refuse"
     except Refused as exc:
         assert "허용되지 않은" in str(exc)

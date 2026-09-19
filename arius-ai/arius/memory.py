@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from arius.embeddings import Embedder, chunk_text, cosine, from_blob, to_blob
+from arius.privacy import redact
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages (
@@ -82,6 +83,13 @@ CREATE TABLE IF NOT EXISTS agent_log (
     summary  TEXT NOT NULL,
     detail   TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS approvals (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts       REAL NOT NULL,
+    tool     TEXT NOT NULL,
+    args_key TEXT NOT NULL DEFAULT '',  -- a short, stable rendering of the arguments
+    approved INTEGER NOT NULL           -- 1 = the user said yes, 0 = no
+);
 CREATE TABLE IF NOT EXISTS vectors (
     kind     TEXT NOT NULL,          -- 'fact' | 'knowledge'
     username TEXT NOT NULL,
@@ -93,6 +101,13 @@ CREATE TABLE IF NOT EXISTS vectors (
     PRIMARY KEY (kind, username, ref, idx, model)
 );
 """
+
+# Columns added after the first release; created on open when missing.
+_FACT_MIGRATIONS = (
+    ("source", "TEXT NOT NULL DEFAULT 'user'"),      # who told us: user | agent | web | system
+    ("confidence", "REAL NOT NULL DEFAULT 1.0"),     # 0..1
+    ("confirmed_ts", "REAL NOT NULL DEFAULT 0"),     # last time the user re-confirmed it
+)
 
 # Cosine below this is treated as "unrelated" for the hashing embedder.
 DEFAULT_MIN_SCORE = 0.12
@@ -107,6 +122,17 @@ class Fact:
     tags: str = ""
     ts: float = 0.0
     score: float = 0.0
+    source: str = "user"
+    confidence: float = 1.0
+    confirmed_ts: float = 0.0
+
+    def meta(self) -> str:
+        """'저장 2026-09-19 · 출처 사용자 · 신뢰도 100% · 확인 2026-09-19'"""
+        src = {"user": "사용자", "agent": "에이전트", "web": "웹", "system": "시스템"}.get(self.source, self.source)
+        parts = [f"저장 {_date(self.ts)}", f"출처 {src}", f"신뢰도 {round(self.confidence * 100)}%"]
+        if self.confirmed_ts:
+            parts.append(f"확인 {_date(self.confirmed_ts)}")
+        return " · ".join(parts)
 
 
 @dataclass
@@ -156,7 +182,14 @@ class Memory:
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        have = {r["name"] for r in self._conn.execute("PRAGMA table_info(facts)").fetchall()}
+        for col, decl in _FACT_MIGRATIONS:
+            if col not in have:
+                self._conn.execute(f"ALTER TABLE facts ADD COLUMN {col} {decl}")
 
     @_locked
     def close(self) -> None:
@@ -193,17 +226,31 @@ class Memory:
 
     # -- facts (explicit learning) -----------------------------------------
     @_locked
-    def learn_fact(self, username: str, key: str, value: str, tags: str = "") -> None:
+    def learn_fact(
+        self, username: str, key: str, value: str, tags: str = "", *, source: str = "user", confidence: float = 1.0
+    ) -> None:
         key, value = key.strip(), value.strip()
+        now = time.time()
         self._conn.execute(
-            """INSERT INTO facts (username, key, value, tags, ts)
-               VALUES (?, ?, ?, ?, ?)
+            """INSERT INTO facts (username, key, value, tags, ts, source, confidence, confirmed_ts)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(username, key) DO UPDATE SET value=excluded.value,
-                   tags=excluded.tags, ts=excluded.ts""",
-            (username, key, value, tags, time.time()),
+                   tags=excluded.tags, ts=excluded.ts, source=excluded.source,
+                   confidence=excluded.confidence, confirmed_ts=excluded.confirmed_ts""",
+            (username, key, value, tags, now, source, max(0.0, min(1.0, float(confidence))), now),
         )
         self._index_fact(username, key, value)
         self._conn.commit()
+
+    @_locked
+    def confirm_fact(self, username: str, key: str) -> bool:
+        """The user re-confirmed a stored fact: bump its confirmation date and confidence."""
+        cur = self._conn.execute(
+            "UPDATE facts SET confirmed_ts = ?, confidence = 1.0 WHERE username = ? AND key = ?",
+            (time.time(), username, key.strip()),
+        )
+        self._conn.commit()
+        return cur.rowcount > 0
 
     @_locked
     def forget_fact(self, username: str, key: str) -> bool:
@@ -214,9 +261,20 @@ class Memory:
         return cur.rowcount > 0
 
     @_locked
+    def forget_all(self, username: str) -> dict[str, int]:
+        """'내 정보를 모두 잊어': facts, learned web pages, and the conversation log of one user."""
+        counts = {}
+        for table in ("facts", "knowledge", "messages"):
+            cur = self._conn.execute(f"DELETE FROM {table} WHERE username = ?", (username,))
+            counts[table] = cur.rowcount
+        self._conn.execute("DELETE FROM vectors WHERE username = ?", (username,))
+        self._conn.commit()
+        return counts
+
+    @_locked
     def list_facts(self, username: str) -> list[Fact]:
         rows = self._conn.execute(
-            "SELECT key, value, tags, ts FROM facts WHERE username = ? ORDER BY key",
+            "SELECT key, value, tags, ts, source, confidence, confirmed_ts FROM facts WHERE username = ? ORDER BY key",
             (username,),
         ).fetchall()
         return [Fact(**dict(r)) for r in rows]
@@ -374,7 +432,7 @@ class Memory:
     def log_agent(self, kind: str, summary: str, detail: str = "") -> None:
         self._conn.execute(
             "INSERT INTO agent_log (ts, kind, summary, detail) VALUES (?, ?, ?, ?)",
-            (time.time(), kind, summary, detail),
+            (time.time(), kind, redact(summary), redact(detail)),
         )
         self._conn.commit()
 
@@ -382,6 +440,40 @@ class Memory:
     def agent_log(self, limit: int = 20) -> list[dict]:
         rows = self._conn.execute(
             "SELECT ts, kind, summary, detail FROM agent_log ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in reversed(rows)]
+
+    # -- behaviour learning: what the user approves / refuses -----------------
+    @_locked
+    def record_approval(self, tool: str, args_key: str, approved: bool) -> None:
+        self._conn.execute(
+            "INSERT INTO approvals (ts, tool, args_key, approved) VALUES (?, ?, ?, ?)",
+            (time.time(), tool, redact(args_key)[:200], 1 if approved else 0),
+        )
+        self._conn.commit()
+
+    @_locked
+    def approval_stats(self, tool: str) -> tuple[int, int]:
+        """(approved, refused) counts for a tool."""
+        row = self._conn.execute(
+            "SELECT SUM(approved) AS yes, SUM(1 - approved) AS no FROM approvals WHERE tool = ?", (tool,)
+        ).fetchone()
+        return int(row["yes"] or 0), int(row["no"] or 0)
+
+    @_locked
+    def approval_candidates(self, min_approvals: int = 3) -> list[dict]:
+        """Tools the user keeps approving and never refused — candidates for auto_allow."""
+        rows = self._conn.execute(
+            """SELECT tool, SUM(approved) AS yes, SUM(1 - approved) AS no, MAX(ts) AS last
+               FROM approvals GROUP BY tool HAVING yes >= ? AND no = 0 ORDER BY yes DESC""",
+            (min_approvals,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    @_locked
+    def recent_approvals(self, limit: int = 20) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT ts, tool, args_key, approved FROM approvals ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(r) for r in reversed(rows)]
 
@@ -463,6 +555,10 @@ class Memory:
             "SELECT (SELECT COUNT(*) FROM facts) + (SELECT COUNT(*) FROM knowledge) AS n"
         ).fetchone()["n"]
         return self.reindex() if has_data else 0
+
+
+def _date(ts: float) -> str:
+    return time.strftime("%Y-%m-%d", time.localtime(ts)) if ts else "?"
 
 
 def _keyword_passage(content: str, terms: list[str], width: int = 200) -> str:

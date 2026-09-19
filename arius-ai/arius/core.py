@@ -13,16 +13,20 @@ Routing for each input:
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
-from arius.config import AriusConfig, load_config
+from arius.config import AriusConfig, config_to_dict, find_config, load_config
 from arius.agent.loop import AgentLoop, AgentResult
 from arius.agent.tools import ToolContext, build_registry
 from arius.embeddings import build_embedder
 from arius.llm import LLMBackend, Message, build_backend
 from arius.memory import Memory
+from arius.modes import MODES, get_mode
+from arius.privacy import redact
 from arius.permissions import (
     AccessDenied,
     AuthenticationError,
@@ -69,12 +73,24 @@ class Arius:
         # and where agent progress lines go. Defaults are safe (deny / silent).
         self.confirm: Callable[[str], bool] = lambda desc: False
         self.notify: Callable[[str], None] = lambda msg: None
+        # Called with the new mode key after set_mode() (the CLI pauses the heartbeat in sleep mode).
+        self.on_mode_change: Callable[[str], None] = lambda key: None
+        self.config_path: Path | None = None
         self.memory.seed_policies(self.config.agent.policies)
 
     # -- construction helpers ------------------------------------------------
     @classmethod
     def from_path(cls, config_path: str | None = None, search_dir: str = ".") -> "Arius":
-        return cls(load_config(config_path, search_dir))
+        inst = cls(load_config(config_path, search_dir))
+        inst.config_path = find_config(config_path, search_dir)
+        return inst
+
+    def save_config(self) -> bool:
+        """Persist the in-memory config (auto_allow changes etc.). False when no file is known."""
+        if self.config_path is None:
+            return False
+        self.config_path.write_text(json.dumps(config_to_dict(self.config), ensure_ascii=False, indent=2), encoding="utf-8")
+        return True
 
     def _default_db_path(self) -> str:
         d = self.config.resolved_data_dir
@@ -122,13 +138,13 @@ class Arius:
                 registry=self.registry,
                 tools=self.tool_context(session),
                 agent=lambda goal, _s=session: self.run_agent(_s, goal).final,
+                arius=self,
             )
             try:
                 result = skill.run(ctx, text)
             except AccessDenied as exc:
                 return Reply(str(exc), f"denied:{skill.name}")
-            self.memory.add_message(session.user.username, "user", text)
-            self.memory.add_message(session.user.username, "assistant", result)
+            self._record(session, text, result)
             return Reply(result, f"skill:{skill.name}")
 
         if (
@@ -138,11 +154,15 @@ class Arius:
             and session.can("agent.run")
         ):
             result = self.run_agent(session, text)
-            self.memory.add_message(session.user.username, "user", text)
-            self.memory.add_message(session.user.username, "assistant", result.final)
+            self._record(session, text, result.final)
             return Reply(result.final, "agent")
 
         return self._chat(text, session, channel)
+
+    def _record(self, session: Session, user_text: str, reply_text: str) -> None:
+        """Conversation log — with secrets masked, per the memory rules."""
+        self.memory.add_message(session.user.username, "user", redact(user_text))
+        self.memory.add_message(session.user.username, "assistant", redact(reply_text))
 
     # -- autonomous agent ---------------------------------------------------
     _AGENT_TRIGGER = re.compile(
@@ -158,13 +178,18 @@ class Arius:
 
     def agent_loop(self, session: Session | None = None, **overrides) -> AgentLoop:
         a = self.config.agent
+        mode = get_mode(self.current_mode())
         kwargs = dict(
             autonomy=a.autonomy,
-            max_steps=a.max_steps,
+            max_steps=min(a.max_steps, mode.max_steps),
             auto_allow=a.auto_allow,
             confirm=self.confirm,
             on_event=self.notify,
-            persona=f"당신은 '{self.config.assistant_name}'입니다. {self.config.persona.style_notes}",
+            persona=(
+                f"당신은 '{self.config.assistant_name}'입니다. {self.config.persona.style_notes} "
+                f"현재 운영 모드: {mode.label} — {mode.prompt} "
+                "보고는 '완료했습니다. …' / '실행하지 않았습니다. 이유: … 다음 조치: …' 형식을 지킵니다."
+            ),
         )
         kwargs.update(overrides)
         return AgentLoop(self.backend, self.tools, self.tool_context(session), **kwargs)
@@ -178,12 +203,14 @@ class Arius:
     def _chat(self, text: str, session: Session | None = None, channel: str = "console") -> Reply:
         session = session or self.session
         username = session.user.username
+        mode_key = self.current_mode()
+        mode = get_mode(mode_key)
         recalled = []
         if session.can("memory.read"):
-            recalled = self.memory.recall_facts(username, text, limit=4)
+            recalled = self.memory.recall_facts(username, text, limit=mode.recall)
 
-        system = build_system_prompt(self.config, session, recalled, channel=channel, mood=self.current_mood())
-        history = self.memory.recent_messages(username, limit=10)
+        system = build_system_prompt(self.config, session, recalled, channel=channel, mood=self.current_mood(), mode=mode_key)
+        history = self.memory.recent_messages(username, limit=4 if mode_key in ("fast", "sleep") else 10)
         messages = [Message(role=m["role"], content=m["content"]) for m in history if m["role"] in ("user", "assistant")]
         messages.append(Message(role="user", content=text))
 
@@ -196,8 +223,7 @@ class Arius:
         if degraded:
             reply_text += f"\n\n(알림: 요청하신 백엔드를 쓸 수 없어 오프라인 모드로 답했습니다 — {degraded})"
 
-        self.memory.add_message(username, "user", text)
-        self.memory.add_message(username, "assistant", reply_text)
+        self._record(session, text, reply_text)
         return Reply(reply_text, f"llm:{self.backend.name}")
 
     # -- mood ------------------------------------------------------------------
@@ -211,16 +237,32 @@ class Arius:
         return ""
 
     def set_mood(self, mood: str) -> None:
-        self.memory.learn_fact("__arius__", self.MOOD_KEY, mood)
+        self.memory.learn_fact("__arius__", self.MOOD_KEY, mood, source="system")
+
+    # -- operating mode --------------------------------------------------------
+    MODE_KEY = "mode"
+
+    def current_mode(self) -> str:
+        for f in self.memory.list_facts("__arius__"):
+            if f.key == self.MODE_KEY and f.value in MODES:
+                return f.value
+        return self.config.agent.default_mode if self.config.agent.default_mode in MODES else "accurate"
+
+    def set_mode(self, key: str) -> str:
+        if key not in MODES:
+            raise ValueError(f"unknown mode: {key}")
+        self.memory.learn_fact("__arius__", self.MODE_KEY, key, source="system")
+        self.on_mode_change(key)
+        return key
 
     # -- helpers -------------------------------------------------------------
     def _refusal(self, capability: str, session: Session | None = None) -> str:
         session = session or self.session
         return (
-            f"죄송하지만 그 작업에는 '{capability}' 권한이 필요합니다. "
-            f"현재 {session.user.display_name}{self.config.persona.honorific}의 "
-            f"등급은 '{session.role.label}'이라 실행할 수 없습니다. "
-            "권한이 있는 계정으로 로그인하시거나 오너에게 권한 상향을 요청하십시오."
+            "실행하지 않았습니다.\n"
+            f"이유: '{capability}' 권한이 필요한데, {session.user.display_name}{self.config.persona.honorific}의 "
+            f"현재 등급은 '{session.role.label}'입니다.\n"
+            "다음 조치: 권한이 있는 계정으로 로그인하거나('/login <아이디>') 오너에게 권한 상향을 요청해 주세요."
         )
 
     def close(self) -> None:

@@ -31,6 +31,7 @@ class SkillContext:
     registry: "SkillRegistry"
     tools: object | None = None  # arius.agent.tools.ToolContext when available
     agent: object | None = None  # callable(goal) -> report, runs the agent loop
+    arius: object | None = None  # the orchestrator (modes, config saving); None in bare tests
 
 
 class Skill(ABC):

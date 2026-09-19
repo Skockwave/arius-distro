@@ -78,6 +78,8 @@ CAP_DISCORD_READ = "discord.read"  # read recent channel messages (bot)
 CAP_DISCORD_ANNOUNCE = "discord.announce"  # post/edit announcements
 CAP_AGENT_RUN = "agent.run"  # ask the agent to do a task / run a heartbeat
 CAP_AGENT_MANAGE = "agent.manage"  # policies, autonomy level, on/off
+CAP_DESKTOP_OPEN = "desktop.open"  # launch named programs, open files/folders/websites, switch windows
+CAP_DESKTOP_MANAGE = "desktop.manage"  # close programs (always confirmed)
 
 
 ROLE_CAPABILITIES: dict[Role, set[str]] = {
@@ -100,6 +102,8 @@ ROLE_CAPABILITIES: dict[Role, set[str]] = {
         CAP_DISCORD_ANNOUNCE,
         CAP_AGENT_RUN,
         CAP_AGENT_MANAGE,
+        CAP_DESKTOP_OPEN,
+        CAP_DESKTOP_MANAGE,
     },
     Role.OPERATOR: {
         CAP_CHAT,
@@ -115,6 +119,7 @@ ROLE_CAPABILITIES: dict[Role, set[str]] = {
         CAP_DISCORD_READ,
         CAP_DISCORD_ANNOUNCE,
         CAP_AGENT_RUN,
+        CAP_DESKTOP_OPEN,
     },
     Role.USER: {
         CAP_CHAT,
