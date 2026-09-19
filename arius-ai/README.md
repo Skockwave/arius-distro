@@ -537,11 +537,12 @@ class WeatherSkill(Skill):
 ## 테스트
 
 ```bash
-pip install pytest
+pip install -e ".[dev]"   # pytest + ruff
 python -m pytest -q
+ruff check .
 ```
 
-GitHub Actions(`.github/workflows/ci.yml`)가 `arius-ai/` 를 건드리는 모든 푸시와 PR에서 같은 테스트를 Python 3.10 / 3.11 / 3.12 로 자동 실행하고, ruff 로 문법 오류·미정의 이름을 검사합니다.
+GitHub Actions(`.github/workflows/ci.yml`)가 `arius-ai/` 를 건드리는 모든 푸시와 PR에서 같은 테스트를 우분투(Python 3.10 / 3.11 / 3.12)와 Windows(3.12)에서 자동 실행하고, `ruff check .` (기본 규칙: 문법 오류, 미정의·미사용 이름, 잘못된 비교 등)를 통과해야 합니다.
 
 ---
 

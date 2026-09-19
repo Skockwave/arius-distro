@@ -17,7 +17,7 @@ from arius.llm.echo_backend import EchoBackend
 from arius.memory import Memory
 from arius.minecraft import ServerStatus
 from arius.modes import MODES, parse_mode
-from arius.permissions import PermissionManager, Role, Session, User
+from arius.permissions import Role, Session, User
 from arius.persona import build_system_prompt
 from arius.privacy import looks_secret, redact
 from arius.voice import TextToSpeech, VoiceConversation, speakable

@@ -4,7 +4,6 @@ from arius.memory import Memory
 from arius.skills import SkillRegistry
 from arius.skills.builtin import (
     WebLearnSkill,
-    WebRecallSkill,
     default_skills,
 )
 from arius.web import WebPage, _html_to_page, extract_first_url

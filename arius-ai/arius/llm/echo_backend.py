@@ -40,8 +40,8 @@ class EchoBackend(LLMBackend):
 
         if _GREETING.search(text):
             return self._rng.choice([
-                f"반가워요! 기다리고 있었어요. 오늘은 어떤 하루였어요?",
-                f"어서 와요. 얼굴 보니(목소리 들으니) 좋네요. 뭐부터 도와드릴까요?",
+                "반가워요! 기다리고 있었어요. 오늘은 어떤 하루였어요?",
+                "어서 와요. 얼굴 보니(목소리 들으니) 좋네요. 뭐부터 도와드릴까요?",
                 f"안녕하세요, {self.assistant_name}예요. 오늘도 같이 잘 해봐요.",
             ])
         if _BYE.search(text):
