@@ -60,20 +60,24 @@ class TextToSpeech:
 
     # -- detection -----------------------------------------------------------
     def _pick(self) -> str | None:
+        pyttsx3_note = ""
         try:
             import pyttsx3  # type: ignore
-
-            engine = pyttsx3.init()
-            engine.setProperty("rate", self.rate)
-            if self.voice_name:
-                for v in engine.getProperty("voices") or []:
-                    if self.voice_name.lower() in (getattr(v, "name", "") or "").lower():
-                        engine.setProperty("voice", v.id)
-                        break
-            self._engine = engine
-            return "pyttsx3"
-        except Exception:  # pragma: no cover - depends on host audio stack
-            pass
+        except ImportError:
+            pyttsx3 = None  # type: ignore
+        if pyttsx3 is not None:
+            try:
+                engine = pyttsx3.init()
+                engine.setProperty("rate", self.rate)
+                if self.voice_name:
+                    for v in engine.getProperty("voices") or []:
+                        if self.voice_name.lower() in (getattr(v, "name", "") or "").lower():
+                            engine.setProperty("voice", v.id)
+                            break
+                self._engine = engine
+                return "pyttsx3"
+            except Exception as exc:  # pragma: no cover - depends on host audio stack
+                pyttsx3_note = f" (pyttsx3 는 설치됐지만 엔진 초기화 실패: {exc.__class__.__name__})"
         system = platform.system()
         if system == "Darwin" and shutil.which("say"):
             return "say"
@@ -82,10 +86,13 @@ class TextToSpeech:
         for cmd in ("spd-say", "espeak-ng", "espeak"):
             if shutil.which(cmd):
                 return cmd
-        self.reason = (
-            "사용 가능한 음성 엔진이 없습니다. `pip install pyttsx3` 또는 OS 음성 도구"
-            "(macOS say / Linux espeak-ng)를 설치하십시오."
-        )
+        if platform.system() == "Linux":
+            fix = "Linux 는 `sudo apt install espeak-ng` (또는 `speech-dispatcher`) 를 설치하면 됩니다."
+        elif pyttsx3 is None:
+            fix = "`pip install pyttsx3` 를 설치하면 OS 내장 음성을 사용합니다."
+        else:
+            fix = "OS 음성 설정에서 한국어 음성이 설치되어 있는지 확인하십시오."
+        self.reason = f"사용 가능한 음성 엔진이 없습니다.{pyttsx3_note} {fix}"
         return None
 
     @property

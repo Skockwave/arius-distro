@@ -402,6 +402,29 @@ def cmd_listen(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_setup(args: argparse.Namespace) -> int:
+    """Install/diagnose optional features: `setup voice`, `setup check`."""
+    from arius.setup import check_voice, install_voice
+
+    what = (args.what or "check").lower()
+    if what == "voice":
+        print("음성 기능(마이크 인식 + 음성 출력) 라이브러리를 설치합니다. 1~3분 걸릴 수 있습니다…\n")
+        rep = install_voice()
+    elif what == "check":
+        rep = check_voice()
+    else:
+        print("사용법: python main.py setup voice | check")
+        return 2
+    print(rep.render())
+    print()
+    if rep.ok:
+        print("음성 준비 완료! `python main.py listen` (Windows: run.bat listen) 으로 이름을 부르면 대답합니다.")
+    else:
+        print("일부 항목이 실패했습니다. 위의 ❌ 안내대로 조치한 뒤 `python main.py setup check` 로 다시 확인하십시오.")
+        print("(음성 인식 없이도 텍스트 대화·에이전트·서버 관리는 모두 동작합니다.)")
+    return 0 if rep.ok else 1
+
+
 def _handle_login(arius: Arius, line: str) -> None:
     parts = line.split()
     if len(parts) < 2:
@@ -525,6 +548,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     listen_p = sub.add_parser("listen", help="이름을 부르면 대답하는 음성 대화 모드")
     listen_p.set_defaults(func=cmd_listen)
+
+    setup_p = sub.add_parser("setup", help="선택 기능 설치/진단: setup voice | check")
+    setup_p.add_argument("what", nargs="?", default="check", help="voice (설치) | check (진단)")
+    setup_p.set_defaults(func=cmd_setup)
 
     init_p = sub.add_parser("init", help="config 생성 및 오너 계정 설정")
     init_p.add_argument("--force", action="store_true", help="기존 config 덮어쓰기")

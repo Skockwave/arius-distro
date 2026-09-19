@@ -87,8 +87,7 @@ python main.py          # 실행
 |---|---|
 | 진짜 추론 (클라우드) | `pip install anthropic` + 환경변수 `ANTHROPIC_API_KEY` + `init`에서 2번 |
 | 진짜 추론 (완전 오프라인) | https://ollama.com 설치 → `ollama pull exaone3.5` → `init`에서 3번 |
-| 말하는 자비스 | `pip install pyttsx3` (없어도 OS 내장 음성으로 동작) |
-| 마이크 입력 | `pip install SpeechRecognition pyaudio` |
+| 말하는 자비스 + 마이크 | **`setup-voice.bat` 더블클릭** (또는 `python main.py setup voice`) — 설치와 마이크 점검까지 한 번에 |
 
 ### 문제가 생기면
 
@@ -305,8 +304,22 @@ ARIUS › 최근 로그에 "Can't keep up" 경고가 6회 있어 TPS 저하가 �
 ```bash
 python main.py listen        # 또는 REPL에서 /wake
 ```
-"**아리우스**" 또는 "**자비스**"(`voice.wake_words`)라고 부르면 "네, 듣고 있어요"라고 답하고, 이어지는 말에 음성으로 대답합니다. 한 번 대답한 뒤 `awake_seconds`(기본 20초) 동안은 이름 없이 계속 대화됩니다. 띄어쓰기·문장부호가 달라도("아리 우스!") 인식합니다.
-필요: `pip install SpeechRecognition pyaudio` (음성 인식) + TTS(`pyttsx3` 또는 OS 내장 음성). 인식은 Google 웹 음성(무료, 인터넷 필요)을 씁니다.
+"**아리우스**" 또는 "**자비스**"(`voice.wake_words`)라고 부르면 "네, 듣고 있어요"라고 답하고, 이어지는 말에 음성으로 대답합니다. 한 번 대답한 뒤 `awake_seconds`(기본 20초) 동안은 이름 없이 계속 대화됩니다. 띄어쓰기·문장부호가 달라도("아리 우스!") 인식합니다. 인식은 Google 웹 음성(무료, 인터넷 필요)을 씁니다.
+
+### 마이크·음성 라이브러리 설치 (더블클릭 한 번)
+
+| OS | 방법 |
+|---|---|
+| Windows | `setup-voice.bat` 더블클릭 (또는 `run.bat setup voice`) |
+| macOS / Linux | `bash setup-voice.sh` (macOS는 Homebrew로 PortAudio까지 자동) |
+| 아무 OS | `python main.py setup voice` — 설치 후 진단까지, `python main.py setup check` — 진단만 |
+
+설치기는 **SpeechRecognition(인식) + PyAudio(마이크) + pyttsx3(음성 출력)** 를 가상환경에 넣고, 각 항목을 ✅/❌ 로 보여 주며 **마이크 장치 목록**까지 확인합니다. `install.bat` / `install.sh` 도 기본으로 이 설치를 포함합니다(엔터만 치면 됨).
+
+❌ 가 나오면 이렇게 하십시오:
+- **PyAudio 빌드 실패** — Windows: Python 3.10~3.13 이면 보통 그냥 설치됩니다(실패 시 `pip install pipwin && pipwin install pyaudio`). macOS: `brew install portaudio` 후 재시도. Ubuntu: `sudo apt install portaudio19-dev python3-dev` 후 재시도.
+- **음성 출력 엔진 없음** — Windows/macOS 는 OS 내장 음성을 쓰므로 거의 없음. Linux: `sudo apt install espeak-ng`.
+- **마이크 목록 0개** — 이어폰/헤드셋을 꽂고, Windows 설정 → 개인정보 → 마이크 → "데스크톱 앱이 마이크에 액세스" 허용.
 
 ## 웹 학습 (인터넷에서 배우기)
 
@@ -404,6 +417,7 @@ arius-ai/
 ├── main.py                  # 진입점 (python main.py)
 ├── bootstrap.ps1 / .sh      # 한 줄 자동 설치 (다운로드부터 바로가기까지)
 ├── install.bat / run.bat    # Windows 설치·실행 (더블클릭)
+├── setup-voice.bat / .sh    # 마이크·음성 라이브러리 설치 + 진단 (더블클릭)
 ├── install.sh  / run.sh     # macOS·Linux 설치·실행
 ├── config.example.json      # 설정 예시
 ├── arius/
@@ -414,6 +428,7 @@ arius-ai/
 │   ├── embeddings.py        # 임베딩(해싱 / sentence-transformers / ollama) + 문단 분할
 │   ├── ollama.py            # 로컬 Ollama HTTP 클라이언트 (표준 라이브러리)
 │   ├── voice.py             # 음성 출력(TTS)·입력(STT) + 웨이크워드 대화
+│   ├── setup.py             # 선택 기능 설치·진단 (setup voice / check)
 │   ├── minecraft.py         # 서버 핑, RCON, 로컬 서버 프로세스/로그/시작
 │   ├── discord.py           # 웹훅·봇 REST 클라이언트
 │   ├── discord_chat.py      # 채널 대화 모드 (폴링)

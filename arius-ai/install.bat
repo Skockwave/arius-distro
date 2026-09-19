@@ -42,12 +42,15 @@ if exist ".venv\Scripts\python.exe" (
 )
 echo.
 
-set /p EXTRAS=선택 기능을 설치할까요? (Claude 연결 + 음성 출력/입력) [y/N]:
-if /i "%EXTRAS%"=="y" (
+set "EXTRAS=y"
+set /p EXTRAS=음성 기능(마이크 인식 + 음성 출력)을 설치할까요? [Y/n]:
+if /i not "%EXTRAS%"=="n" (
   %PY% -m pip install --upgrade pip >nul 2>&1
-  %PY% -m pip install anthropic pyttsx3 SpeechRecognition
-  echo (마이크 입력을 쓰려면 추가로: %PY% -m pip install pyaudio)
+  %PY% main.py setup voice
 )
+set "CLOUD=n"
+set /p CLOUD=Claude 클라우드 연결용 패키지(anthropic)도 설치할까요? [y/N]:
+if /i "%CLOUD%"=="y" %PY% -m pip install anthropic
 echo.
 
 if exist "config.json" (

@@ -32,11 +32,14 @@ fi
 [ -x ".venv/bin/python" ] && PY=".venv/bin/python"
 echo
 
-read -r -p "선택 기능을 설치할까요? (Claude 연결 + 음성 출력/입력) [y/N]: " EXTRAS || EXTRAS=""
-if [[ "${EXTRAS:-}" =~ ^[Yy]$ ]]; then
+read -r -p "음성 기능(마이크 인식 + 음성 출력)을 설치할까요? [Y/n]: " EXTRAS || EXTRAS=""
+if [[ ! "${EXTRAS:-}" =~ ^[Nn]$ ]]; then
   "$PY" -m pip install --upgrade pip >/dev/null 2>&1 || true
-  "$PY" -m pip install anthropic pyttsx3 SpeechRecognition || echo "[경고] 일부 패키지 설치 실패 - 핵심 기능은 그대로 동작합니다."
-  echo "(마이크 입력: macOS는 'brew install portaudio' 후, Linux는 'sudo apt install portaudio19-dev' 후 '$PY -m pip install pyaudio')"
+  "$PY" main.py setup voice || true
+fi
+read -r -p "Claude 클라우드 연결용 패키지(anthropic)도 설치할까요? [y/N]: " CLOUD || CLOUD=""
+if [[ "${CLOUD:-}" =~ ^[Yy]$ ]]; then
+  "$PY" -m pip install anthropic || echo "[경고] anthropic 설치 실패 - 나중에 다시 시도하십시오."
 fi
 echo
 
