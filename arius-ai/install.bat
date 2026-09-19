@@ -59,6 +59,10 @@ if exist "config.json" (
   %PY% main.py init
 )
 echo.
+set "AUTO=y"
+set /p AUTO=컴퓨터를 켤 때 ARIUS를 자동으로 시작할까요? [Y/n]:
+if /i not "%AUTO%"=="n" %PY% main.py autostart enable
+echo.
 echo ==========================================
 echo   설치 완료!
 echo   앞으로는 run.bat 을 더블클릭해 실행하십시오.

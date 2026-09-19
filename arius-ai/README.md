@@ -248,7 +248,7 @@ ARIUS › 최근 로그에 "Can't keep up" 경고가 6회 있어 TPS 저하가 �
 
 - **자유 요청**: "…해줘", "…봐줘", `작업: …`, `/do …` 로 말하면 에이전트가 도구를 골라 처리합니다 (실제 LLM 필요: Claude 또는 Ollama).
 - **상시 정책**: `정책 추가: 서버 꺼지면 다시 켜고 디스코드에 공지해` 처럼 자연어 규칙을 등록하면, **하트비트**(기본 10분)마다 AI가 상태를 보고 정책이 요구하는 조치만 합니다. `/agent run` 으로 지금 바로 점검, `/agent on` 으로 백그라운드 시작, `/agent log` 로 기록 확인.
-- **헤드리스 데몬**: 서버 PC에서 `python main.py agent` (또는 `agent --discord`) 로 REPL 없이 24시간 돌립니다.
+- **상시 데몬**: `python main.py agent --discord --listen` 으로 REPL 없이 24시간 — 하트비트 + 디스코드 대화 + 음성 대기를 한 프로세스로. 컴퓨터 켤 때 자동 시작은 아래 "컴퓨터를 켜면 자동으로 시작하기".
 - LLM이 없어도(오프라인) "디스크 N% / 메모리 N% / 서버 꺼지면 …" 같은 단순 정책은 **규칙 엔진**이 처리합니다.
 
 ### 안전 경계 (일부러 이렇게 만들었습니다)
@@ -320,6 +320,20 @@ python main.py listen        # 또는 REPL에서 /wake
 - **PyAudio 빌드 실패** — Windows: Python 3.10~3.13 이면 보통 그냥 설치됩니다(실패 시 `pip install pipwin && pipwin install pyaudio`). macOS: `brew install portaudio` 후 재시도. Ubuntu: `sudo apt install portaudio19-dev python3-dev` 후 재시도.
 - **음성 출력 엔진 없음** — Windows/macOS 는 OS 내장 음성을 쓰므로 거의 없음. Linux: `sudo apt install espeak-ng`.
 - **마이크 목록 0개** — 이어폰/헤드셋을 꽂고, Windows 설정 → 개인정보 → 마이크 → "데스크톱 앱이 마이크에 액세스" 허용.
+
+## 컴퓨터를 켜면 자동으로 시작하기
+
+한 번 등록하면 로그인할 때마다 ARIUS가 **서버 감시(하트비트) + 디스코드 대화 + 이름 부르면 대답(음성)** 을 한 프로세스로 켭니다.
+
+| OS | 방법 |
+|---|---|
+| Windows | **`setup-autostart.bat` 더블클릭** → 시작프로그램에 등록 (창 없이 백그라운드로 할지 물어봄) |
+| macOS / Linux | `bash setup-autostart.sh` → LaunchAgent / autostart 등록 |
+| 아무 OS | `python main.py autostart enable` (옵션: `--hidden`, `--no-discord`, `--no-listen`) · `status` · `disable` |
+
+`install.bat` / `install.sh` 도 마지막에 "자동 시작할까요?"를 물어봅니다(Enter = 예). 실행 기록은 `~/.arius/agent.log` 에 남습니다(창 없이 돌릴 때도 확인 가능).
+
+> 자동 시작 시 자율 수준이 `supervised` 면 확인해 줄 사람이 없어 **변경 조치는 `auto_allow` 목록만** 실행됩니다. 무인 운영을 원하면 `config.json` 의 `agent.autonomy` 를 `"autonomous"` 로 두십시오 — 그래도 서버 중지/재시작 같은 위험 조치는 목록에 없으면 실행하지 않습니다.
 
 ## 웹 학습 (인터넷에서 배우기)
 
@@ -418,6 +432,7 @@ arius-ai/
 ├── bootstrap.ps1 / .sh      # 한 줄 자동 설치 (다운로드부터 바로가기까지)
 ├── install.bat / run.bat    # Windows 설치·실행 (더블클릭)
 ├── setup-voice.bat / .sh    # 마이크·음성 라이브러리 설치 + 진단 (더블클릭)
+├── setup-autostart.bat/.sh  # 컴퓨터 켤 때 자동 시작 등록 (더블클릭)
 ├── install.sh  / run.sh     # macOS·Linux 설치·실행
 ├── config.example.json      # 설정 예시
 ├── arius/
@@ -429,6 +444,7 @@ arius-ai/
 │   ├── ollama.py            # 로컬 Ollama HTTP 클라이언트 (표준 라이브러리)
 │   ├── voice.py             # 음성 출력(TTS)·입력(STT) + 웨이크워드 대화
 │   ├── setup.py             # 선택 기능 설치·진단 (setup voice / check)
+│   ├── autostart.py         # 로그인 자동 시작 (시작프로그램 / LaunchAgent / autostart)
 │   ├── minecraft.py         # 서버 핑, RCON, 로컬 서버 프로세스/로그/시작
 │   ├── discord.py           # 웹훅·봇 REST 클라이언트
 │   ├── discord_chat.py      # 채널 대화 모드 (폴링)

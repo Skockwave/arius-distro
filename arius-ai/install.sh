@@ -48,7 +48,11 @@ if [ -f "config.json" ]; then
 else
   "$PY" main.py init
 fi
-chmod +x run.sh
+chmod +x run.sh setup-voice.sh setup-autostart.sh 2>/dev/null || true
+read -r -p "컴퓨터를 켤 때 ARIUS를 자동으로 시작할까요? [Y/n]: " AUTO || AUTO=""
+if [[ ! "${AUTO:-}" =~ ^[Nn]$ ]]; then
+  "$PY" main.py autostart enable || true
+fi
 echo
 echo "=========================================="
 echo "  설치 완료!  앞으로는  ./run.sh  로 실행하십시오."

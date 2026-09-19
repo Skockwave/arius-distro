@@ -348,15 +348,38 @@ def _ts(ts: float) -> str:
     return _t.strftime("%m-%d %H:%M", _t.localtime(ts))
 
 
+def _log_line(cfg: AriusConfig, line: str) -> None:
+    """Append to ~/.arius/agent.log (kept under ~5MB) so hidden/background runs leave a trace."""
+    try:
+        path = cfg.resolved_data_dir / "agent.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists() and path.stat().st_size > 5_000_000:
+            path.write_text("", encoding="utf-8")
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+    except OSError:
+        pass
+
+
 def cmd_agent(args: argparse.Namespace) -> int:
-    """Headless daemon: heartbeat (+ Discord conversation) until Ctrl+C."""
+    """Always-on daemon: heartbeat (+ Discord conversation, + wake-word voice) until Ctrl+C."""
     import time as _t
 
     arius = Arius.from_path(args.config)
     cfg = arius.config
+    if len(cfg.users) == 1 and not cfg.users[0].passphrase_hash:
+        try:
+            arius.login(cfg.users[0].username)
+        except AuthenticationError:
+            pass
 
     def event(msg: str) -> None:
-        print(f"[{_t.strftime('%H:%M:%S')}] {msg}", flush=True)
+        line = f"[{_t.strftime('%Y-%m-%d %H:%M:%S')}] {msg}"
+        try:
+            print(line, flush=True)
+        except Exception:
+            pass  # pythonw has no console
+        _log_line(cfg, line)
 
     if cfg.agent.autonomy != "autonomous":
         event(f"주의: 자율 수준이 '{cfg.agent.autonomy}' 입니다. 데몬에는 승인해 줄 사람이 없어 "
@@ -368,6 +391,15 @@ def cmd_agent(args: argparse.Namespace) -> int:
     if chat:
         chat.start()
     try:
+        if getattr(args, "listen", False):
+            voice = _Voice(cfg)
+            voice.stt = SpeechToText(cfg.voice.language)
+            if voice.stt.available:
+                event("음성 대기 모드: 이름을 부르면 대답합니다.")
+                _wake_conversation(arius, voice, event)  # blocks until Ctrl+C or mic failure
+                event("음성 대기 종료 — 하트비트/디스코드는 계속 동작합니다.")
+            else:
+                event(f"음성 대기 불가: {voice.stt.reason} (setup-voice 로 설치하십시오). 텍스트 없이 감시만 계속합니다.")
         while True:
             _t.sleep(1)
     except KeyboardInterrupt:
@@ -399,6 +431,23 @@ def cmd_listen(args: argparse.Namespace) -> int:
     print(f"음성 대화 모드 — 현재 사용자: {arius.current_user_label}")
     _wake_conversation(arius, voice, event)
     arius.close()
+    return 0
+
+
+def cmd_autostart(args: argparse.Namespace) -> int:
+    """Register/remove ARIUS in the OS login autostart."""
+    from arius.autostart import DEFAULT_ARGS, Autostart
+
+    project_dir = Path(__file__).resolve().parent.parent
+    auto = Autostart(project_dir)
+    if args.action == "enable":
+        run_args = [a for a in DEFAULT_ARGS if not ((args.no_discord and a == "--discord") or (args.no_listen and a == "--listen"))]
+        print(auto.enable(run_args, hidden=args.hidden))
+        print(f"실행 내용: main.py {' '.join(run_args)}  (해제: python main.py autostart disable)")
+    elif args.action == "disable":
+        print(auto.disable())
+    else:
+        print(auto.status())
     return 0
 
 
@@ -542,9 +591,17 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--discord", action="store_true", help="디스코드 대화 모드를 함께 시작")
     run_p.set_defaults(func=cmd_run)
 
-    agent_p = sub.add_parser("agent", help="헤드리스 에이전트 데몬 (하트비트 + 디스코드 대화)")
+    agent_p = sub.add_parser("agent", help="상시 데몬 (하트비트 + 디스코드 대화 + 음성 대기)")
     agent_p.add_argument("--discord", action="store_true", help="디스코드 대화 모드도 실행")
+    agent_p.add_argument("--listen", action="store_true", help="이름을 부르면 대답하는 음성 대기도 실행")
     agent_p.set_defaults(func=cmd_agent)
+
+    auto_p = sub.add_parser("autostart", help="컴퓨터 켤 때 자동 시작: enable | disable | status")
+    auto_p.add_argument("action", nargs="?", default="status", choices=["enable", "disable", "status"])
+    auto_p.add_argument("--hidden", action="store_true", help="Windows: 창 없이 백그라운드로 (pythonw)")
+    auto_p.add_argument("--no-discord", action="store_true", help="디스코드 대화 모드 제외")
+    auto_p.add_argument("--no-listen", action="store_true", help="음성 대기 제외")
+    auto_p.set_defaults(func=cmd_autostart)
 
     listen_p = sub.add_parser("listen", help="이름을 부르면 대답하는 음성 대화 모드")
     listen_p.set_defaults(func=cmd_listen)
