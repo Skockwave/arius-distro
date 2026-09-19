@@ -29,7 +29,7 @@ def test_macos_writes_launchagent_and_loads_it():
     msg = auto.enable(["agent"])
     plist = auto.entry_path()
     assert plist.exists() and plist.name == "com.arius.agent.plist"
-    text = plist.read_text()
+    text = plist.read_text(encoding="utf-8")
     assert "<string>main.py</string>" in text and "<string>agent</string>" in text and "RunAtLoad" in text
     assert any(c[:2] == ["launchctl", "load"] for c in calls)
     assert "켜짐" in auto.status()
@@ -43,7 +43,7 @@ def test_linux_writes_desktop_entry_with_log_redirect():
     auto.enable()
     entry = auto.entry_path()
     assert entry.exists() and entry.suffix == ".desktop"
-    text = entry.read_text()
+    text = entry.read_text(encoding="utf-8")
     assert "[Desktop Entry]" in text and "main.py agent --discord --listen" in text and "agent.log" in text
     assert "자동 시작이 등록되어 있지 않습니다" in Autostart("/x", system="Linux", home=Path(tempfile.mkdtemp())).disable()
 

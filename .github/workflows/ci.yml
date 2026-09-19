@@ -24,13 +24,20 @@ defaults:
 
 jobs:
   test:
-    name: pytest (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: pytest (Python ${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python-version: ["3.10", "3.11", "3.12"]
+        include:
+          # ARIUS is installed on Windows by default (bootstrap.ps1 / install.bat),
+          # so run the suite there too. Deliberately without PYTHONUTF8 (which the
+          # .bat launchers set) so an I/O call that forgets encoding= is caught.
+          - os: windows-latest
+            python-version: "3.12"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
