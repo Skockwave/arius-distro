@@ -97,6 +97,8 @@ python main.py          # 실행
 - **한글이 깨짐** → `run.bat` / `run.sh`로 실행하십시오(UTF-8 자동 설정). 직접 실행 시엔 Windows에서 `chcp 65001` 후 실행.
 - **`/exec` 명령이 Windows에서 안 됨** → `dir`, `echo` 같은 cmd 내장 명령도 지원합니다. 오너/관리자 등급인지 `/whoami`로 확인하십시오.
 - **가상환경 생성 실패(Ubuntu)** → `sudo apt install python3-venv` 후 재실행. 실패해도 시스템 Python으로 계속 동작합니다.
+- **무엇이 문제인지 모르겠음** → **`run.bat doctor`** (`python main.py doctor`). 설정·로그인·백엔드·음성·마이크·서버·디스코드·자동 시작을 한 화면에 ✅/⚠️/❌ 로 보여주고 각 항목의 조치를 적어 줍니다. 도움을 요청할 때 이 화면을 통째로 붙이면 됩니다.
+- **이어폰/헤드셋 마이크로 말해도 반응이 없음** → 이어폰을 꽂아도 Windows 기본 마이크가 바뀌지 않는 경우입니다. `setup-voice.bat`(또는 `python main.py setup check`) 의 "마이크 목록"에서 이어폰 항목의 번호나 이름 일부를 보고 `config.json` 의 `voice.input_device` 에 넣으십시오 (예: `"input_device": "이어폰"` 또는 `"2"`). 한 번만 시험하려면 `run.bat listen --device 이어폰`.
 - **시작하면 "게스트"로 뜸** → 오너 계정에 암호가 걸려 있어 시작 시 암호 입력에서 Enter 를 친 경우입니다. `/login <아이디>` 로 로그인하거나, 암호를 없애 자동 로그인하려면 **`run.bat passwd --clear`** (`python main.py passwd --clear`).
 - **답변에 "(참고: 지금은 오프라인 응답 모드…)" 가 붙음** → 실제 언어 모델이 연결되지 않은 상태입니다. 로컬 모델은 Ollama 설치 → `ollama pull exaone3.5` → **`run.bat backend ollama exaone3.5`**, 클라우드는 API 키 저장 후 **`run.bat backend anthropic`**. 이 명령이 config 를 고치고 무엇이 빠졌는지 바로 알려줍니다. (`backend: ollama` 인데 모델이 `claude-…` 로 남아 있어도 이 명령이 정리합니다.)
 
@@ -203,7 +205,7 @@ AI가 "권한에 따라 통제된다"는 요구를 이렇게 구현했습니다.
 
 세션 명령: `/login <아이디>`, `/logout`, `/quit`. 음성: `/voice on|off`, `/listen`, `/wake`. 모드: `/mode`. 에이전트: `/agent run|on|off|log|autonomy`, `정책 추가/목록/삭제`. 디스코드: `/discord on|off`. 기타: `/reindex`.
 
-터미널 명령(`run.bat …` 또는 `python main.py …`): `init`(설정 생성), `passwd [--clear]`(암호 설정/제거), `backend ollama|anthropic|echo [모델]`(추론 백엔드 전환+점검), `setup voice|check`, `listen`, `agent`, `autostart enable|disable|status`.
+터미널 명령(`run.bat …` 또는 `python main.py …`): `doctor`(한 화면 진단), `init`(설정 생성), `passwd [--clear]`(암호 설정/제거), `backend ollama|anthropic|echo [모델]`(추론 백엔드 전환+점검), `setup voice|check`, `listen [--device 마이크]`, `agent`, `autostart enable|disable|status`.
 
 ---
 
@@ -328,6 +330,8 @@ ARIUS › 최근 로그에 "Can't keep up" 경고가 6회 있어 TPS 저하가 �
 python main.py listen        # 또는 REPL에서 /wake
 ```
 "**아리우스**" 또는 "**자비스**"(`voice.wake_words`)라고 부르면 "네, 듣고 있어요"라고 답하고, 이어지는 말에 음성으로 대답합니다. 한 번 대답한 뒤 `awake_seconds`(기본 20초) 동안은 이름 없이 계속 대화됩니다. 띄어쓰기·문장부호가 달라도("아리 우스!") 인식합니다. 인식은 Google 웹 음성(무료, 인터넷 필요)을 씁니다.
+
+**이어폰·헤드셋 마이크 고르기**: 기본은 OS 기본 입력 장치입니다. 이어폰을 꽂았는데 다른 마이크가 잡히면 `python main.py setup check` 의 마이크 목록(번호와 이름)을 보고 `config.json` 에 `"voice": { "input_device": "이어폰" }` 처럼 이름 일부(대소문자 무관)나 번호를 적으십시오. `run.bat listen --device 이어폰` 으로 바로 시험할 수 있고, 시작할 때 `마이크: <장치 이름>` 으로 어떤 장치를 쓰는지 알려줍니다. 스피커(출력)는 Windows 소리 설정의 기본 출력 장치를 따릅니다.
 
 ### 마이크·음성 라이브러리 설치 (더블클릭 한 번)
 

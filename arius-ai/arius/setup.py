@@ -84,12 +84,14 @@ def check_import(module: str, label: str | None = None) -> StepResult:
 
 
 def check_microphones() -> StepResult:
-    from arius.mic import list_input_devices, sounddevice_available
+    from arius.mic import default_input_device, input_devices, sounddevice_available
 
     names: list[str] = []
     ok, _ = sounddevice_available()
     if ok:
-        names = list_input_devices()
+        devs = input_devices()
+        dflt = default_input_device()
+        names = [f"[{i}] {n}" + (" (기본)" if dflt and dflt[0] == i else "") for i, n in devs]
     else:
         try:
             import speech_recognition as sr  # type: ignore
@@ -99,8 +101,8 @@ def check_microphones() -> StepResult:
             return StepResult("마이크 목록", False, f"{exc.__class__.__name__}: {str(exc)[:120]}")
     if not names:
         return StepResult("마이크 목록", False, "마이크 장치를 찾지 못했습니다. 이어폰/헤드셋 연결과 OS 마이크 권한을 확인하십시오.")
-    shown = ", ".join(n for n in names[:5] if n)
-    return StepResult("마이크 목록", True, f"{len(names)}개 — {shown}")
+    shown = ", ".join(n for n in names[:6] if n)
+    return StepResult("마이크 목록", True, f"{len(names)}개 — {shown}  (이어폰 마이크를 쓰려면 config voice.input_device 에 이름 일부나 번호)")
 
 
 def check_mic_library() -> StepResult:

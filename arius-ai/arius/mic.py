@@ -48,19 +48,60 @@ def sounddevice_available() -> tuple[bool, str]:
     return True, ""
 
 
-def list_input_devices() -> list[str]:
-    try:
-        import sounddevice as sd  # type: ignore
+def list_input_devices(sd=None) -> list[str]:
+    """Names of input-capable devices, in sounddevice index order (gaps for output-only devices are dropped)."""
+    return [name for _idx, name in input_devices(sd)]
 
-        return [d["name"] for d in sd.query_devices() if d.get("max_input_channels", 0) > 0]
+
+def input_devices(sd=None) -> list[tuple[int, str]]:
+    """(index, name) of every device with an input channel."""
+    try:
+        if sd is None:
+            import sounddevice as sd  # type: ignore
+        out = []
+        for idx, d in enumerate(sd.query_devices()):
+            if d.get("max_input_channels", 0) > 0:
+                out.append((idx, str(d.get("name", ""))))
+        return out
     except Exception:
         return []
 
 
-def _default_stream_factory():
+def default_input_device(sd=None) -> tuple[int, str] | None:
+    try:
+        if sd is None:
+            import sounddevice as sd  # type: ignore
+        idx = sd.default.device[0]
+        if idx is None or idx < 0:
+            return None
+        return idx, str(sd.query_devices(idx).get("name", ""))
+    except Exception:
+        return None
+
+
+def find_input_device(query: str | int | None, sd=None) -> tuple[int, str] | None:
+    """Resolve a config value to (index, name): an index, or a case-insensitive substring of the
+    device name ("이어폰", "Headset", "Realtek"). None/"" = the OS default input."""
+    if query is None or query == "":
+        return None
+    devices = input_devices(sd)
+    if isinstance(query, int) or str(query).strip().isdigit():
+        idx = int(query)
+        for i, name in devices:
+            if i == idx:
+                return i, name
+        return None
+    q = str(query).strip().lower()
+    for i, name in devices:
+        if q in name.lower():
+            return i, name
+    return None
+
+
+def _default_stream_factory(device: int | None = None):
     import sounddevice as sd  # type: ignore
 
-    stream = sd.RawInputStream(samplerate=SAMPLE_RATE, blocksize=BLOCK, channels=1, dtype="int16")
+    stream = sd.RawInputStream(samplerate=SAMPLE_RATE, blocksize=BLOCK, channels=1, dtype="int16", device=device)
     stream.start()
 
     def read() -> bytes:
@@ -82,8 +123,10 @@ class Microphone:
         preroll_seconds: float = 0.3,
         min_threshold: float = 250.0,
         clock: Callable[[], float] = time.monotonic,
+        device: int | None = None,
     ) -> None:
-        self._factory = stream_factory or _default_stream_factory
+        self.device = device
+        self._factory = stream_factory or (lambda: _default_stream_factory(device))
         self.calibrate_seconds = calibrate_seconds
         self.silence_seconds = silence_seconds
         self.preroll_seconds = preroll_seconds

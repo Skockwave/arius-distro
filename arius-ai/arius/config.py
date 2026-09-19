@@ -68,6 +68,8 @@ class VoiceConfig:
     voice_name: str = ""  # substring of a preferred OS voice name, e.g. "Yuna"
     wake_words: list[str] = field(default_factory=list)  # empty = the assistant's name
     awake_seconds: int = 20  # after answering, keep listening without the wake word
+    # Which microphone to use: "" = OS default, else a device index or a name fragment ("이어폰", "Headset").
+    input_device: str = ""
 
 
 @dataclass
@@ -325,6 +327,7 @@ def config_to_dict(config: AriusConfig) -> dict[str, Any]:
             "voice_name": config.voice.voice_name,
             "wake_words": list(config.voice.wake_words),
             "awake_seconds": config.voice.awake_seconds,
+            "input_device": config.voice.input_device,
         },
         "agent": {
             "enabled": config.agent.enabled,

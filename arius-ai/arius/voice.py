@@ -149,7 +149,14 @@ class SpeechToText:
     """Google Web Speech via SpeechRecognition. Microphone backends, in order:
     sounddevice (prebuilt wheels, no compiler) then PyAudio (sr.Microphone)."""
 
-    def __init__(self, language: str = "ko-KR", timeout: float = 6.0, phrase_limit: float = 15.0, microphone=None) -> None:
+    def __init__(
+        self,
+        language: str = "ko-KR",
+        timeout: float = 6.0,
+        phrase_limit: float = 15.0,
+        microphone=None,
+        input_device: str | int | None = None,
+    ) -> None:
         self.language = language
         self.timeout = timeout
         self.phrase_limit = phrase_limit
@@ -158,6 +165,8 @@ class SpeechToText:
         self._mic = microphone  # injected sounddevice-style Microphone (tests) or None
         self.mic_backend: str | None = None
         self.reason: str | None = None
+        self.input_device = input_device  # config voice.input_device: index or name substring ("이어폰")
+        self.device_name: str = ""  # resolved device, for status lines
         try:
             import speech_recognition as sr  # type: ignore
 
@@ -169,11 +178,24 @@ class SpeechToText:
         if self._mic is not None:
             self.mic_backend = "sounddevice"
             return
-        from arius.mic import Microphone, sounddevice_available
+        from arius.mic import Microphone, default_input_device, find_input_device, sounddevice_available
 
         ok, why = sounddevice_available()
         if ok:
-            self._mic = Microphone()
+            device_index = None
+            if input_device not in (None, ""):
+                found = find_input_device(input_device)
+                if found is None:
+                    self.reason = (
+                        f"마이크 '{input_device}' 을(를) 찾지 못했습니다. `python main.py setup check` 로 이름을 확인하고 "
+                        "config voice.input_device 를 고치십시오 (비우면 OS 기본 마이크)."
+                    )
+                    return
+                device_index, self.device_name = found
+            else:
+                dflt = default_input_device()
+                self.device_name = dflt[1] if dflt else ""
+            self._mic = Microphone(device=device_index)
             self.mic_backend = "sounddevice"
             return
         try:

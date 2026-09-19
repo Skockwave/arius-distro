@@ -481,3 +481,81 @@ def test_backend_switch_writes_config_and_diagnoses(monkeypatch, capsys):
         assert cfg.llm.backend == "anthropic" and cfg.llm.model.startswith("claude")
         assert cli.main(["-c", str(path), "backend", "echo"]) == 0
         assert _coerce(json.loads(path.read_text(encoding="utf-8"))).llm.backend == "echo"
+
+
+# --- microphone device selection & doctor ---------------------------------------------------
+
+
+class _FakeSD:
+    """Just enough of the sounddevice module for device resolution."""
+
+    def __init__(self, devices, default=1):
+        self._devices = devices
+        self.default = type("D", (), {"device": (default, default)})()
+
+    def query_devices(self, idx=None):
+        return self._devices if idx is None else self._devices[idx]
+
+
+def test_find_input_device_by_name_or_index():
+    from arius.mic import default_input_device, find_input_device, input_devices
+
+    sd = _FakeSD([
+        {"name": "Speakers (Realtek)", "max_input_channels": 0},
+        {"name": "Microphone (Realtek Audio)", "max_input_channels": 2},
+        {"name": "Headset Microphone (이어폰)", "max_input_channels": 1},
+    ])
+    assert input_devices(sd) == [(1, "Microphone (Realtek Audio)"), (2, "Headset Microphone (이어폰)")]
+    assert find_input_device("이어폰", sd) == (2, "Headset Microphone (이어폰)")
+    assert find_input_device("headset", sd) == (2, "Headset Microphone (이어폰)")
+    assert find_input_device("2", sd) == (2, "Headset Microphone (이어폰)")
+    assert find_input_device("0", sd) is None  # output-only device
+    assert find_input_device("웹캠", sd) is None
+    assert find_input_device("", sd) is None and find_input_device(None, sd) is None
+    assert default_input_device(sd) == (1, "Microphone (Realtek Audio)")
+
+
+def test_stt_reports_missing_named_device(monkeypatch):
+    import arius.mic as mic
+    from arius.voice import SpeechToText
+
+    try:
+        import speech_recognition  # noqa: F401
+    except ImportError:
+        return  # STT layer unavailable here; the resolution logic is covered above
+    monkeypatch.setattr(mic, "sounddevice_available", lambda: (True, ""))
+    monkeypatch.setattr(mic, "find_input_device", lambda q, sd=None: None)
+    stt = SpeechToText(input_device="없는마이크")
+    assert not stt.available and "없는마이크" in (stt.reason or "") and "setup check" in stt.reason
+    monkeypatch.setattr(mic, "find_input_device", lambda q, sd=None: (3, "Headset (이어폰)"))
+    monkeypatch.setattr(mic, "Microphone", lambda device=None: type("M", (), {"device": device})())
+    stt = SpeechToText(input_device="이어폰")
+    assert stt.available and stt.mic_backend == "sounddevice" and stt.device_name == "Headset (이어폰)" and stt._mic.device == 3
+
+
+def test_voice_input_device_roundtrips_through_config():
+    cfg = AriusConfig()
+    cfg.voice.input_device = "이어폰"
+    assert _coerce(config_to_dict(cfg)).voice.input_device == "이어폰"
+
+
+def test_doctor_prints_one_screen_diagnosis(monkeypatch, capsys):
+    from arius import cli, setup
+
+    monkeypatch.setattr(setup, "check_voice", lambda: setup.SetupReport([setup.StepResult("음성 인식 라이브러리", True), setup.StepResult("마이크 목록", True, "2개 — [1] Mic, [2] 이어폰")]))
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = AriusConfig(users=[UserConfig("owner", "owner", "형")], assistant_name="자비스", data_dir=tmp)
+        cfg.voice.wake_words = ["자비스"]
+        path = Path(tmp, "config.json")
+        path.write_text(json.dumps(config_to_dict(cfg), ensure_ascii=False), encoding="utf-8")
+        rc = cli.main(["-c", str(path), "doctor"])
+        out = capsys.readouterr().out
+        assert rc == 0, out
+        for key in ("[ARIUS 진단]", "config: ✅", "호출어 '자비스'", "계정: ✅ 오너 'owner'", "백엔드: ⚠️ 오프라인", "음성: ✅", "이어폰", "서버 '마인크래프트 서버'", "디스코드:", "자동 시작:", "에이전트:", "스킬 응답: ✅", "종합: ✅"):
+            assert key in out, key
+        # a named microphone that does not exist is a real failure
+        cfg.voice.input_device = "없는마이크"
+        path.write_text(json.dumps(config_to_dict(cfg), ensure_ascii=False), encoding="utf-8")
+        rc = cli.main(["-c", str(path), "doctor"])
+        out = capsys.readouterr().out
+        assert rc == 1 and "❌ 찾지 못함" in out and "종합: ❌" in out

@@ -132,13 +132,19 @@ def _make_discord_chat(arius: Arius, on_event) -> DiscordChat | None:
                        mention_only=d.chat_mention_only, poll_seconds=d.poll_seconds, on_event=on_event)
 
 
+def _make_stt(cfg: AriusConfig, device: str | None = None) -> SpeechToText:
+    return SpeechToText(cfg.voice.language, input_device=device if device is not None else cfg.voice.input_device)
+
+
 def _wake_conversation(arius: Arius, voice: "_Voice", on_event) -> None:
     """Foreground voice mode: listen for the wake word, converse, until Ctrl+C."""
     if voice.stt is None:
-        voice.stt = SpeechToText(arius.config.voice.language)
+        voice.stt = _make_stt(arius.config)
     if not voice.stt.available:
         print(voice.stt.reason)
         return
+    if voice.stt.device_name:
+        on_event(f"마이크: {voice.stt.device_name}")
     if voice.tts is None:
         v = arius.config.voice
         voice.tts = TextToSpeech(v.language, v.rate, v.voice_name)
@@ -186,7 +192,7 @@ class _Voice:
 
     def enable_listening(self) -> str:
         if self.stt is None:
-            self.stt = SpeechToText(self.cfg.voice.language)
+            self.stt = _make_stt(self.cfg)
         if not self.stt.available:
             self.listening = False
             return f"음성 입력을 켤 수 없습니다: {self.stt.reason}"
@@ -200,7 +206,7 @@ class _Voice:
     def hear_once(self) -> str | None:
         """One utterance from the mic, or None (with a printed reason) if unavailable."""
         if self.stt is None:
-            self.stt = SpeechToText(self.cfg.voice.language)
+            self.stt = _make_stt(self.cfg)
         if not self.stt.available:
             print(self.stt.reason)
             return None
@@ -470,7 +476,7 @@ def cmd_agent(args: argparse.Namespace) -> int:
     try:
         if getattr(args, "listen", False):
             voice = _Voice(cfg)
-            voice.stt = SpeechToText(cfg.voice.language)
+            voice.stt = _make_stt(cfg)
             if voice.stt.available:
                 event("음성 대기 모드: 이름을 부르면 대답합니다.")
                 _wake_conversation(arius, voice, event)  # blocks until Ctrl+C or mic failure
@@ -495,6 +501,9 @@ def cmd_listen(args: argparse.Namespace) -> int:
     cfg = arius.config
     _startup_login(arius)
     voice = _Voice(cfg)
+    if getattr(args, "device", None):
+        cfg.voice.input_device = args.device
+    voice.stt = _make_stt(cfg)
 
     def event(msg: str) -> None:
         print(f"[{cfg.assistant_name}] {msg}", flush=True)
@@ -505,6 +514,107 @@ def cmd_listen(args: argparse.Namespace) -> int:
     _wake_conversation(arius, voice, event)
     arius.close()
     return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """One screen that says what works and what to fix: config, login, backend, voice, server, Discord, autostart.
+    Paste its output when asking for help."""
+    import platform
+    import time as _t
+
+    from arius import minecraft as mc
+    from arius.autostart import Autostart
+    from arius.config import find_config
+    from arius.setup import check_voice
+
+    project_dir = Path(__file__).resolve().parent.parent
+    lines = [f"[ARIUS 진단] {_t.strftime('%Y-%m-%d %H:%M')}  {platform.system()} {platform.release()} / Python {platform.python_version()} / 폴더 {project_dir}"]
+    bad = 0
+    path = find_config(args.config)
+    if path is None:
+        lines.append("config: ❌ config.json 이 없습니다 → python main.py init (또는 install.bat)")
+        print("\n".join(lines))
+        return 1
+    try:
+        arius = Arius.from_path(args.config)
+    except Exception as exc:
+        lines.append(f"config: ❌ {path} 읽기 실패 — {exc.__class__.__name__}: {exc}")
+        print("\n".join(lines))
+        return 1
+    cfg = arius.config
+    wake = ", ".join(cfg.voice.wake_words) or cfg.assistant_name
+    lines.append(f"config: ✅ {path}  (비서 이름 '{cfg.assistant_name}', 호출어 '{wake}')")
+
+    owners = [u for u in arius.permissions.users() if u.role is Role.OWNER]
+    logged = _startup_login(arius, interactive=False)
+    if not owners:
+        bad += 1
+        lines.append("계정: ❌ 오너(role=owner) 계정이 없습니다 → python main.py init 또는 config.json users 수정")
+    elif owners[0].requires_passphrase:
+        lines.append(f"계정: ⚠️ 오너 '{owners[0].username}' 에 암호가 있어 시작할 때 암호를 묻습니다 (Enter 는 게스트). 자동 로그인: run.bat passwd --clear")
+    else:
+        lines.append(f"계정: ✅ 오너 '{owners[0].username}' 자동 로그인 → 현재 {arius.current_user_label}" + ("" if logged else " (로그인 실패)"))
+
+    be = arius.backend
+    degraded = getattr(be, "_degraded_reason", None)
+    if cfg.llm.backend == "echo":
+        lines.append("백엔드: ⚠️ 오프라인 응답 모드(규칙 기반) — 진짜 대화: run.bat backend ollama exaone3.5 또는 run.bat backend anthropic")
+    elif degraded:
+        bad += 1
+        lines.append(f"백엔드: ❌ {cfg.llm.backend} / 모델 {cfg.llm.model} — {degraded}")
+    else:
+        lines.append(f"백엔드: ✅ {be.name} / 모델 {cfg.llm.model}")
+    if cfg.llm.backend == "ollama":
+        try:
+            from arius.ollama import http_json
+
+            tags = http_json(cfg.llm.base_url)("GET", "/api/tags", None, 2.0)
+            names = sorted({m.get("name", "") for m in (tags.get("models") or []) if isinstance(m, dict)})
+            lines.append(f"   Ollama 모델: {', '.join(names) if names else '(받은 모델 없음 → ollama pull ' + cfg.llm.model + ')'}")
+        except Exception:
+            pass
+    lines.append(f"임베딩: {arius.embedder.name}")
+
+    rep = check_voice()
+    lines.append("음성: " + ("✅ 준비됨" if rep.ok else "⚠️ 일부 미비 (setup-voice.bat 로 설치)"))
+    lines += ["   " + ln for ln in rep.render().splitlines()]
+    if cfg.voice.input_device:
+        from arius.mic import find_input_device
+
+        found = find_input_device(cfg.voice.input_device)
+        lines.append(f"   선택한 마이크(voice.input_device='{cfg.voice.input_device}'): " + (f"✅ [{found[0]}] {found[1]}" if found else "❌ 찾지 못함 — 위 목록의 이름 일부나 번호로 고치십시오"))
+        if not found:
+            bad += 1
+
+    m = cfg.minecraft
+    host, port = mc.parse_host(m.host or "localhost", m.port)
+    status = mc.ping_server(host or "localhost", port, timeout=2.0)
+    procs = mc.find_server_processes()
+    sd = mc.detect_server_dir(m.server_dir, procs)
+    lines.append(f"서버 '{m.name}' {host or 'localhost'}:{port}: " + ("🟢 온라인 " + f"접속자 {status.players_online}/{status.players_max}" if status.online else f"🔴 오프라인 ({(status.error or '응답 없음')[:60]})"))
+    lines.append(f"   서버 폴더: {sd or '미확인 → config minecraft.server_dir'}  | 실행 중 JVM: {len(procs)}개  | RCON 암호: {'설정됨' if m.resolved_rcon_password else '없음 (tps·콘솔 명령 불가 → RCON 설정: <암호>)'}")
+
+    d = cfg.discord
+    lines.append(f"디스코드: 웹훅 {'✅' if d.resolved_webhook else '없음'} / 봇 토큰 {'✅' if d.resolved_token else '없음'} / 대화 채널 {len(d.chat_channels)}개 / 공지 채널 {'✅' if d.channel_id else '없음'}")
+    try:
+        lines.append(Autostart(project_dir).status())
+    except Exception as exc:
+        lines.append(f"자동 시작: 확인 실패 ({exc.__class__.__name__})")
+    policies = arius.memory.list_policies(enabled_only=True)
+    lines.append(f"에이전트: 자율 수준 {cfg.agent.autonomy}, 하트비트 {'자동 시작' if cfg.agent.enabled else '수동(/agent on)'}, 정책 {len(policies)}개, 모드 {get_mode(arius.current_mode()).label}")
+    if owners:
+        lines.append(f"기억: {len(arius.memory.list_facts(owners[0].username))}개")
+    try:
+        reply = arius.handle("현재 모드")
+        lines.append("스킬 응답: " + ("✅" if reply.source.startswith("skill:") else f"❌ ({reply.source})"))
+    except Exception as exc:
+        bad += 1
+        lines.append(f"스킬 응답: ❌ {exc.__class__.__name__}: {exc}")
+    arius.close()
+    lines.append("")
+    lines.append("종합: " + ("✅ 바로 쓸 수 있습니다." if bad == 0 else f"❌ {bad}개 항목을 위 안내대로 고치십시오.") + " 도움을 요청할 때는 이 화면을 통째로 붙여 주세요.")
+    print("\n".join(lines))
+    return 0 if bad == 0 else 1
 
 
 def cmd_autostart(args: argparse.Namespace) -> int:
@@ -788,7 +898,11 @@ def build_parser() -> argparse.ArgumentParser:
     auto_p.set_defaults(func=cmd_autostart)
 
     listen_p = sub.add_parser("listen", help="이름을 부르면 대답하는 음성 대화 모드")
+    listen_p.add_argument("--device", help="마이크 장치: 번호 또는 이름 일부 (예: 이어폰, Headset). 기본은 config voice.input_device")
     listen_p.set_defaults(func=cmd_listen)
+
+    doctor_p = sub.add_parser("doctor", help="한 화면 진단: 설정·로그인·백엔드·음성·서버·디스코드·자동 시작")
+    doctor_p.set_defaults(func=cmd_doctor)
 
     setup_p = sub.add_parser("setup", help="선택 기능 설치/진단: setup voice | check")
     setup_p.add_argument("what", nargs="?", default="check", help="voice (설치) | check (진단)")
