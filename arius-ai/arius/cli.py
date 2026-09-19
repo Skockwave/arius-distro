@@ -297,7 +297,19 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _ensure_utf8() -> None:
+    """Korean in/out on Windows consoles needs UTF-8 streams (run.bat sets chcp 65001 too)."""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            enc = (getattr(stream, "encoding", "") or "").lower().replace("-", "")
+            if stream is not None and hasattr(stream, "reconfigure") and enc != "utf8":
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _ensure_utf8()
     parser = build_parser()
     args = parser.parse_args(argv)
     if not getattr(args, "command", None):

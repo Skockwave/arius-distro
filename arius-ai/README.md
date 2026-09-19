@@ -22,21 +22,60 @@
 
 ---
 
-## 빠른 시작 (30초, 추가 설치 없음)
+## 내 컴퓨터에 설치하기
 
-핵심 기능은 **파이썬 표준 라이브러리만으로** 동작합니다. 파이썬 3.10+ 만 있으면 됩니다.
+핵심 기능은 **파이썬 표준 라이브러리만으로** 동작합니다. 필요한 건 **Python 3.10 이상** 하나뿐입니다.
+
+### 1) 코드 받기
+
+- **ZIP**: GitHub 저장소 페이지에서 브랜치 선택 → 초록색 **Code** → **Download ZIP** → 압축 해제 → 그 안의 `arius-ai` 폴더를 씁니다.
+- **git**:
+  ```bash
+  git clone https://github.com/Skockwave/arius-distro.git
+  cd arius-distro/arius-ai
+  ```
+  (아직 `main`에 합쳐지기 전이라면 `git clone -b claude/high-performance-ai-system-ibqiwl …`)
+
+### 2) Windows — 더블클릭 두 번
+
+1. Python이 없다면 https://www.python.org/downloads/ 에서 설치. 설치 화면 맨 아래 **"Add python.exe to PATH" 체크 필수**.
+2. `arius-ai` 폴더의 **`install.bat` 더블클릭** → Python 확인 → 가상환경(.venv) 생성 → 선택 기능 설치 여부 → 오너 계정·백엔드 설정(`init`).
+3. 이후에는 **`run.bat` 더블클릭**으로 실행. 바탕화면 바로가기: `run.bat` 우클릭 → 보내기 → 바탕 화면(바로 가기 만들기).
+
+`run.bat`은 콘솔을 UTF-8로 맞춰 주므로 **한글이 깨지지 않습니다.** 음성으로 실행하려면 바로가기의 "대상" 끝에 ` run --voice` 를 붙이십시오.
+
+### 3) macOS / Linux — 명령 두 줄
+
+```bash
+bash install.sh     # Python 확인 → .venv → 선택 기능 → init
+./run.sh            # 실행 (음성: ./run.sh run --voice)
+```
+
+### 4) 직접 실행 (스크립트 없이)
 
 ```bash
 cd arius-ai
-
-# 1) 설정과 오너 계정 생성 (대화형)
-python main.py init
-
-# 2) 실행
-python main.py
+python main.py init     # 설정과 오너 계정 생성 (대화형)
+python main.py          # 실행
 ```
 
-`init` 없이 바로 체험하려면 예제 설정을 복사하세요:
+### 5) 선택 — 더 똑똑하게
+
+| 원하는 것 | 할 일 |
+|---|---|
+| 진짜 추론 (클라우드) | `pip install anthropic` + 환경변수 `ANTHROPIC_API_KEY` + `init`에서 2번 |
+| 진짜 추론 (완전 오프라인) | https://ollama.com 설치 → `ollama pull exaone3.5` → `init`에서 3번 |
+| 말하는 자비스 | `pip install pyttsx3` (없어도 OS 내장 음성으로 동작) |
+| 마이크 입력 | `pip install SpeechRecognition pyaudio` |
+
+### 문제가 생기면
+
+- **`python`을 찾을 수 없음** → Python 설치 시 "Add to PATH"를 안 켠 경우. 재설치하거나 `install.bat`이 `py` 런처를 자동으로 찾습니다.
+- **한글이 깨짐** → `run.bat` / `run.sh`로 실행하십시오(UTF-8 자동 설정). 직접 실행 시엔 Windows에서 `chcp 65001` 후 실행.
+- **`/exec` 명령이 Windows에서 안 됨** → `dir`, `echo` 같은 cmd 내장 명령도 지원합니다. 오너/관리자 등급인지 `/whoami`로 확인하십시오.
+- **가상환경 생성 실패(Ubuntu)** → `sudo apt install python3-venv` 후 재실행. 실패해도 시스템 Python으로 계속 동작합니다.
+
+`init` 없이 바로 체험만 하려면 예제 설정을 복사하세요:
 
 ```bash
 cp config.example.json config.json
@@ -264,6 +303,8 @@ ARIUS › 기억하고 있는 내용입니다:
 ```
 arius-ai/
 ├── main.py                  # 진입점 (python main.py)
+├── install.bat / run.bat    # Windows 설치·실행 (더블클릭)
+├── install.sh  / run.sh     # macOS·Linux 설치·실행
 ├── config.example.json      # 설정 예시
 ├── arius/
 │   ├── core.py              # 오케스트레이터: 권한검사 → 스킬 라우팅 → LLM

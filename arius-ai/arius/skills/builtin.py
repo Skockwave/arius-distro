@@ -330,21 +330,32 @@ class ExecSkill(Skill):
         m = self._pat.match(text)
         assert m
         cmd = m.group("cmd").strip()
-        try:
-            args = shlex.split(cmd)
-        except ValueError as exc:
-            return f"명령을 해석할 수 없습니다: {exc}"
-        if not args:
+        if not cmd:
             return "실행할 명령이 비어 있습니다."
+        # Windows: go through cmd.exe so builtins like `dir`/`echo` work and paths
+        # keep their backslashes. POSIX: argv list, no shell.
+        if os.name == "nt":
+            run_args: list[str] | str = cmd
+            use_shell = True
+        else:
+            try:
+                run_args = shlex.split(cmd)
+            except ValueError as exc:
+                return f"명령을 해석할 수 없습니다: {exc}"
+            if not run_args:
+                return "실행할 명령이 비어 있습니다."
+            use_shell = False
         try:
             proc = subprocess.run(
-                args,
+                run_args,
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=20,
+                shell=use_shell,
             )
         except FileNotFoundError:
-            return f"명령을 찾을 수 없습니다: {args[0]}"
+            return f"명령을 찾을 수 없습니다: {cmd.split()[0]}"
         except subprocess.TimeoutExpired:
             return "명령이 20초 제한을 초과하여 중단했습니다."
         out = (proc.stdout or "").strip()

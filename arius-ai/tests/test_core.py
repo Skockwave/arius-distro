@@ -86,3 +86,10 @@ def test_user_admin_add_and_setrole():
     assert arius.permissions.get("newbie").role is Role.OPERATOR
     changed = arius.handle("권한 변경 newbie admin")
     assert arius.permissions.get("newbie").role is Role.ADMIN
+
+
+def test_ensure_utf8_never_raises():
+    from arius.cli import _ensure_utf8
+
+    _ensure_utf8()  # must be a no-op or a successful reconfigure on any platform
+    _ensure_utf8()  # idempotent
