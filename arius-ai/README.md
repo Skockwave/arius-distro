@@ -16,7 +16,10 @@
 | **"권한에 따라 통제"** | ✅ **RBAC(역할 기반 접근 제어)** — 오너/관리자/운영자/사용자/게스트 5단계. 각 기능마다 필요한 권한이 있고, 등급이 낮으면 시스템이 차단 |
 | **"고난이도의 학습"** | ✅ 영구 기억 + **의미 기반 회상(임베딩 유사도)** + **웹 학습**. 가르친 사실뿐 아니라 **웹 페이지(URL)를 읽어 본문을 수집·저장**하고 회상. 크롬(Chromium) 렌더링 옵션 지원. (⚠️ 개인 PC에서 모델을 처음부터 훈련시키는 것은 비현실적 — 아래 "학습의 진실" 참고) |
 | **"슈트 제작"** | ⚠️ 소프트웨어는 물리적 슈트를 만들 수 없습니다. 대신 **프로젝트 관리 기능**으로 '슈트' 프로젝트의 계획·기록·진행을 도와줍니다 (아이언맨의 자비스도 실제로는 CAD/제어 소프트웨어였습니다) |
-| **"말하는" 자비스 (음성)** | ✅ 답변을 **음성으로 읽어주고**(TTS), **마이크로 듣습니다**(STT). 라이브러리가 없어도 OS 내장 음성으로 동작하고, 아무것도 없으면 조용히 텍스트로 폴백 |
+| **"말하는" 자비스 (음성)** | ✅ 답변을 **음성으로 읽어주고**(TTS), **마이크로 듣습니다**(STT). **이름을 부르면 대답하는 대화 모드**(`listen`) 포함. 라이브러리가 없어도 OS 내장 음성으로 동작 |
+| **"스스로 생각해서 관리"** | ✅ **자율 에이전트** — 컴퓨터·서버 상태를 관찰하고, 상시 정책을 읽고, LLM이 도구를 골라 조치. 3단계 자율 수준 + 확인 게이트 + 도구 허용 목록으로 **안전 경계** 안에서만 |
+| **마인크래프트 서버 관리** | ✅ 로컬 Bukkit/Spigot/Paper 서버(예: 메테노서버) 상태·로그·RCON 콘솔·시작/재시작, 죽으면 자동 복구(정책) |
+| **디스코드** | ✅ 공지 게시(웹훅/봇) + **채널에서 사람처럼 감정을 담아 대화**하는 봇 모드 |
 
 즉, 이 저장소는 **진짜로 실행되는 개인 AI 비서의 뼈대**입니다. 추가 설치 없이 바로 켜지고, API 키를 넣으면 실제 대형 언어 모델로 똑똑해집니다.
 
@@ -158,6 +161,11 @@ ARIUS › 죄송하지만 그 작업에는 'system.exec' 권한이 필요합니�
 | `system.info` | 시스템 정보 조회 | | | ● | ● | ● |
 | `web.read` | 학습한 웹 내용 회상 | | ● | ● | ● | ● |
 | `web.learn` | **웹 페이지 학습(수집)** | | | ● | ● | ● |
+| `mc.read` | 서버 상태/로그 조회 | | ● | ● | ● | ● |
+| `mc.admin` | 서버 콘솔 명령·시작/중지 | | | | ● | ● |
+| `discord.read` / `discord.announce` | 디스코드 읽기 / 공지 | | | ● | ● | ● |
+| `files.read` | 서버 폴더 파일 읽기 | | | ● | ● | ● |
+| `agent.run` / `agent.manage` | 에이전트에게 일 맡기기 / 정책·자율 수준 관리 | | | 실행 | ● | ● |
 | `system.exec` | **셸 명령 실행** | | | | ● | ● |
 | `user.manage` | 사용자/권한 관리 | | | | | ● |
 
@@ -181,7 +189,7 @@ ARIUS › 죄송하지만 그 작업에는 'system.exec' 권한이 필요합니�
 | `/exec echo hi`, `명령 실행: ls` | 셸 명령 실행 (위험) | system.exec |
 | 그 외 아무 말 | 자유 대화(LLM) | chat |
 
-세션 명령: `/login <아이디>`, `/logout`, `/quit`. 음성: `/voice on|off`, `/listen`. 기타: `/reindex`(기억 벡터 재색인).
+세션 명령: `/login <아이디>`, `/logout`, `/quit`. 음성: `/voice on|off`, `/listen`, `/wake`. 에이전트: `/agent run|on|off|log|autonomy`, `정책 추가/목록/삭제`. 디스코드: `/discord on|off`. 기타: `/reindex`.
 
 ---
 
@@ -227,6 +235,78 @@ ARIUS › ... (알림: 요청하신 백엔드를 쓸 수 없어 오프라인 모
 임베딩도 로컬 신경망으로 바꾸려면 `ollama pull bge-m3` 후 `"embeddings": { "backend": "ollama" }` 로 두고 `/reindex` — 이러면 **대화·기억·회상 전부가 내 PC 안에서만** 돌아갑니다.
 
 ---
+
+## 자율 에이전트 — 스스로 생각해서 관리하기
+
+ARIUS는 정해진 스케줄을 도는 게 아니라, **관찰 → 생각 → 행동** 루프로 움직입니다.
+
+```
+오너 › 서버 로그에서 오류 찾아서 문제 있으면 디스코드에 알려줘
+[ARIUS] minecraft_log 실행: [12:01] [Server thread/WARN]: Can't keep up! …
+[ARIUS] discord_announce 실행: 디스코드(웹훅) 전송 완료 …
+ARIUS › 최근 로그에 "Can't keep up" 경고가 6회 있어 TPS 저하가 의심됩니다. 운영 채널에 요약을 올렸습니다.
+```
+
+- **자유 요청**: "…해줘", "…봐줘", `작업: …`, `/do …` 로 말하면 에이전트가 도구를 골라 처리합니다 (실제 LLM 필요: Claude 또는 Ollama).
+- **상시 정책**: `정책 추가: 서버 꺼지면 다시 켜고 디스코드에 공지해` 처럼 자연어 규칙을 등록하면, **하트비트**(기본 10분)마다 AI가 상태를 보고 정책이 요구하는 조치만 합니다. `/agent run` 으로 지금 바로 점검, `/agent on` 으로 백그라운드 시작, `/agent log` 로 기록 확인.
+- **헤드리스 데몬**: 서버 PC에서 `python main.py agent` (또는 `agent --discord`) 로 REPL 없이 24시간 돌립니다.
+- LLM이 없어도(오프라인) "디스크 N% / 메모리 N% / 서버 꺼지면 …" 같은 단순 정책은 **규칙 엔진**이 처리합니다.
+
+### 안전 경계 (일부러 이렇게 만들었습니다)
+
+| 층 | 무엇을 막나 |
+|---|---|
+| **도구 자체** | 에이전트에게는 **임의 셸 명령 실행, 파일 쓰기/삭제 도구가 없습니다.** 할 수 있는 건 서버 상태/로그 읽기, 허용 목록 안의 콘솔 명령, 서버 시작/중지/재시작, 디스코드 공지, 기억뿐 |
+| **RCON 허용 목록** | `agent.rcon_allow` 에 있는 명령만 (`list, tps, save-all, say, whitelist, kick …`). `op / ban / stop / reload / give` 는 목록 밖 → 거부 |
+| **읽기 범위** | 파일은 서버 폴더와 `agent.read_paths` 안에서만 읽기 |
+| **자율 수준** | `observe` 읽기만 / `supervised`(기본) 변경은 매번 y/n 확인 / `autonomous` 는 `agent.auto_allow` 에 적은 도구만 자동, 서버 중지·재시작은 목록에 없으면 항상 확인 |
+| **RBAC** | 에이전트도 로그인한 사람의 등급을 넘지 못함 (게스트는 관찰조차 불가) |
+
+`config.json` 예:
+```json
+"agent": { "autonomy": "autonomous", "interval_minutes": 10,
+           "policies": ["서버가 꺼지면 다시 켜고 디스코드에 공지해", "디스크 85% 넘으면 알려줘"],
+           "auto_allow": ["discord_announce", "minecraft_say", "minecraft_command", "minecraft_start"] }
+```
+> "컴퓨터를 직접 만져서 자동으로"라는 요청에 대해: 위 경계 안에서는 완전 자동입니다. 경계 밖(임의 명령·파일 삭제)은 **일부러** 열지 않았습니다 — 모델의 실수 한 번이 컴퓨터를 망가뜨릴 수 있기 때문입니다. 필요한 콘솔 명령은 `rcon_allow` 에, 읽을 폴더는 `read_paths` 에 추가하면 됩니다.
+
+## 마인크래프트 서버 관리 (로컬 Bukkit/Spigot/Paper)
+
+서버 이름·주소·폴더는 `config.json` 의 `minecraft` 에 둡니다 (`"name": "메테노서버"`, `"host": "localhost"`, `"server_dir": "C:/서버폴더"`). 폴더를 비워 두면 **실행 중인 서버 JVM에서 자동 감지**를 시도합니다.
+
+| 말하면 | 하는 일 | 권한 |
+|---|---|---|
+| `서버 상태` | 온라인/접속자/버전/MOTD + 로컬 프로세스·폴더 | mc.read |
+| `서버 로그 오류` / `서버 로그 접속` | latest.log 끝부분을 패턴으로 필터 | mc.read |
+| `서버 명령: list` / `tps` / `whitelist add 철수` | RCON 콘솔 명령 (허용 목록) | mc.admin |
+| `서버 공지: 10분 후 점검` | 서버 채팅 `say` | mc.admin |
+| `서버 시작` | 꺼진 서버를 start.bat/start.sh 로 시작 | mc.admin |
+| `서버 재시작 확인` / `서버 중지 확인` | 예고 → 중지(→ 재시작) | mc.admin |
+| `RCON 설정 <암호>` | server.properties 에 RCON 켜기(백업 생성, 재시작 필요) | mc.admin |
+
+**RCON 준비**: `server.properties` 에 `enable-rcon=true`, `rcon.port=25575`, `rcon.password=암호` → 서버 재시작 → `config.json` 의 `minecraft.rcon_password`(또는 환경변수 `ARIUS_RCON_PASSWORD`)에 같은 암호. `RCON 설정 <암호>` 라고 말하면 ARIUS가 파일 수정까지 해 줍니다.
+
+## 디스코드 — 공지와 대화
+
+**공지(웹훅, 가장 쉬움)**: 채널 설정 → 연동 → 웹훅 만들기 → URL을 `discord.webhook_url`(또는 환경변수 `ARIUS_DISCORD_WEBHOOK`)에. 그러면 `공지 초안: 제목 | 본문` 으로 미리 보고 `공지 전송: …` 으로 게시합니다. 에이전트 정책의 "디스코드에 공지해"도 이 경로를 씁니다.
+
+**대화 모드(봇)**: 사람처럼 감정을 담아 채널에서 이야기합니다.
+1. https://discord.com/developers/applications 에서 앱 → Bot → 토큰 발급, **MESSAGE CONTENT INTENT** 켜기, 서버에 초대(메시지 보기/보내기 권한)
+2. `config.json`: `"bot_token"`(또는 환경변수 `ARIUS_DISCORD_TOKEN`), `"chat_channels": ["채널ID"]`, `"channel_id": "공지채널ID"`
+3. `python main.py run --discord` 또는 REPL에서 `/discord on`, 데몬은 `python main.py agent --discord`
+
+- 기본은 **@멘션하거나 이름(웨이크워드)을 부를 때만** 대답합니다 (`chat_mention_only`). 모든 메시지에 답하게 하려면 `false`.
+- 디스코드 멤버는 `chat_role`(기본 `user`) 등급으로 대화합니다 — 서버 상태는 물어볼 수 있지만 관리 명령은 못 합니다.
+- 감정 표현은 `persona.emotional` (기본 켜짐). 웹소켓 없이 REST 폴링(기본 4초)이라 추가 패키지가 필요 없습니다.
+
+## 이름을 부르면 대답하는 음성 대화
+
+이어폰/헤드셋 마이크를 연결하고:
+```bash
+python main.py listen        # 또는 REPL에서 /wake
+```
+"**아리우스**" 또는 "**자비스**"(`voice.wake_words`)라고 부르면 "네, 듣고 있어요"라고 답하고, 이어지는 말에 음성으로 대답합니다. 한 번 대답한 뒤 `awake_seconds`(기본 20초) 동안은 이름 없이 계속 대화됩니다. 띄어쓰기·문장부호가 달라도("아리 우스!") 인식합니다.
+필요: `pip install SpeechRecognition pyaudio` (음성 인식) + TTS(`pyttsx3` 또는 OS 내장 음성). 인식은 Google 웹 음성(무료, 인터넷 필요)을 씁니다.
 
 ## 웹 학습 (인터넷에서 배우기)
 
@@ -333,7 +413,12 @@ arius-ai/
 │   ├── web.py               # 웹 페이지 수집·본문 추출 (urllib / 크롬)
 │   ├── embeddings.py        # 임베딩(해싱 / sentence-transformers / ollama) + 문단 분할
 │   ├── ollama.py            # 로컬 Ollama HTTP 클라이언트 (표준 라이브러리)
-│   ├── voice.py             # 음성 출력(TTS)·음성 입력(STT), 전부 선택형
+│   ├── voice.py             # 음성 출력(TTS)·입력(STT) + 웨이크워드 대화
+│   ├── minecraft.py         # 서버 핑, RCON, 로컬 서버 프로세스/로그/시작
+│   ├── discord.py           # 웹훅·봇 REST 클라이언트
+│   ├── discord_chat.py      # 채널 대화 모드 (폴링)
+│   ├── sysinfo.py           # CPU/메모리/디스크/프로세스 스냅샷
+│   ├── agent/               # 자율 에이전트: tools(도구·허용 목록) / loop(생각-행동) / heartbeat(정기 점검)
 │   ├── persona.py           # 자비스 스타일 시스템 프롬프트 생성
 │   ├── config.py            # 설정 로딩(JSON, 선택적 YAML)
 │   ├── cli.py               # 대화형 REPL + `init`
@@ -380,7 +465,8 @@ python -m pytest -q
 
 ## 안전 & 주의
 
-- `system.exec` 는 **실제 셸 명령을 실행**합니다. 오너/관리자에게만 부여하고, 신뢰할 수 없는 사람에게 그 등급을 주지 마십시오.
+- `system.exec` 는 **실제 셸 명령을 실행**합니다. 오너/관리자가 직접 칠 때만 쓰이며, **자율 에이전트는 이 기능에 접근할 수 없습니다.** 신뢰할 수 없는 사람에게 그 등급을 주지 마십시오.
+- RCON 암호·디스코드 토큰·웹훅 URL은 환경변수(`ARIUS_RCON_PASSWORD`, `ARIUS_DISCORD_TOKEN`, `ARIUS_DISCORD_WEBHOOK`)에 두는 것을 권장합니다.
 - `config.json` 과 `*.db` 에는 개인 정보·암호 해시가 담길 수 있어 `.gitignore` 처리되어 있습니다. 공개 저장소에 올리지 마십시오.
 - 이 비서는 당신의 컴퓨터에서, 당신이 준 권한 안에서만 동작합니다.
 
@@ -392,6 +478,11 @@ python -m pytest -q
 - [x] 음성 입출력 (STT/TTS) — "말하는" 자비스
 - [x] 임베딩 기반 의미 회상 (기억·웹 지식 유사도 검색, 문단 단위)
 - [x] 로컬 모델 백엔드(Ollama) — 완전 오프라인 추론 + 로컬 임베딩
+- [x] 자율 에이전트(관찰→생각→행동, 정책, 하트비트, 안전 경계)
+- [x] 마인크래프트 서버 관리(핑·RCON·로그·시작/재시작) + 디스코드 공지/대화 봇
+- [x] 이름을 부르면 대답하는 음성 대화
+- [ ] 디스코드 게이트웨이(실시간 이벤트·음성 채널) — 현재는 REST 폴링
+- [ ] 오프라인 웨이크워드 엔진(Porcupine/Vosk) — 현재는 STT 전사 기반
 - [ ] LoRA 미세조정 워크플로 (로컬 모델 위에)
 - [ ] 스마트홈/기기 제어 스킬 (권한으로 통제)
 - [ ] 웹/파일 도구 스킬

@@ -70,6 +70,14 @@ CAP_PROJECT_MANAGE = "project.manage"
 CAP_USER_MANAGE = "user.manage"  # add/remove users, change roles
 CAP_WEB_LEARN = "web.learn"  # fetch web pages and store their content
 CAP_WEB_READ = "web.read"  # recall previously learned web knowledge
+CAP_FILES_READ = "files.read"  # list/read files inside the agent sandbox
+CAP_FILES_WRITE = "files.write"  # write/move/delete files inside the sandbox
+CAP_MC_READ = "mc.read"  # ping the Minecraft server, read the manifest
+CAP_MC_ADMIN = "mc.admin"  # RCON console commands
+CAP_DISCORD_READ = "discord.read"  # read recent channel messages (bot)
+CAP_DISCORD_ANNOUNCE = "discord.announce"  # post/edit announcements
+CAP_AGENT_RUN = "agent.run"  # ask the agent to do a task / run a heartbeat
+CAP_AGENT_MANAGE = "agent.manage"  # policies, autonomy level, on/off
 
 
 ROLE_CAPABILITIES: dict[Role, set[str]] = {
@@ -84,6 +92,14 @@ ROLE_CAPABILITIES: dict[Role, set[str]] = {
         CAP_PROJECT_MANAGE,
         CAP_WEB_LEARN,
         CAP_WEB_READ,
+        CAP_FILES_READ,
+        CAP_FILES_WRITE,
+        CAP_MC_READ,
+        CAP_MC_ADMIN,
+        CAP_DISCORD_READ,
+        CAP_DISCORD_ANNOUNCE,
+        CAP_AGENT_RUN,
+        CAP_AGENT_MANAGE,
     },
     Role.OPERATOR: {
         CAP_CHAT,
@@ -94,6 +110,11 @@ ROLE_CAPABILITIES: dict[Role, set[str]] = {
         CAP_PROJECT_MANAGE,
         CAP_WEB_LEARN,
         CAP_WEB_READ,
+        CAP_FILES_READ,
+        CAP_MC_READ,
+        CAP_DISCORD_READ,
+        CAP_DISCORD_ANNOUNCE,
+        CAP_AGENT_RUN,
     },
     Role.USER: {
         CAP_CHAT,
@@ -101,6 +122,7 @@ ROLE_CAPABILITIES: dict[Role, set[str]] = {
         CAP_MEMORY_WRITE,
         CAP_PROJECT_READ,
         CAP_WEB_READ,
+        CAP_MC_READ,
     },
     Role.GUEST: {
         CAP_CHAT,

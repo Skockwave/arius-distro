@@ -19,7 +19,13 @@ from pathlib import Path
 from arius.config import AriusConfig, UserConfig, config_to_dict
 from arius.core import Arius
 from arius.permissions import AuthenticationError, hash_passphrase
-from arius.voice import SpeechToText, TextToSpeech
+from arius.voice import SpeechToText, TextToSpeech, VoiceConversation
+from arius.agent.heartbeat import Heartbeat
+from arius.agent.loop import AUTONOMY_LEVELS
+from arius.discord import DiscordBot, DiscordError
+from arius.discord_chat import DiscordChat
+from arius.memory import Memory
+from arius.permissions import Role, Session, User
 
 BANNER = r"""
    _   ___ ___ _   _ ___
@@ -29,10 +35,82 @@ BANNER = r"""
 """
 
 HELP_COMMANDS = (
-    "세션: /login <아이디>, /logout, /quit\n"
-    "음성: /voice on|off (답변 읽어주기), /listen (마이크로 한 문장 입력)\n"
-    "기타: /reindex (기억 벡터 재색인), /help (기능 목록)"
+    "세션:   /login <아이디>, /logout, /quit\n"
+    "음성:   /voice on|off (읽어주기), /listen (한 문장 입력), /wake (이름 부르면 대답하는 대화 모드)\n"
+    "에이전트: /agent run [할 일] | on | off | log | autonomy observe|supervised|autonomous\n"
+    "        정책 추가: <규칙> / 정책 목록 / 정책 삭제 <번호>,  자유 요청은 '…해줘' 또는 '작업: …'\n"
+    "디스코드: /discord on|off (채널 대화 모드), 공지 초안: … / 공지 전송: …\n"
+    "기타:   /reindex (기억 벡터 재색인), /help (기능 목록)"
 )
+
+
+def _agent_session(arius: Arius) -> Session:
+    """Who the background agent acts as: the first owner, else a synthetic admin."""
+    for u in arius.permissions.users():
+        if u.role is Role.OWNER:
+            return Session(user=u)
+    return Session(user=User(username="arius-agent", role=Role.ADMIN, display_name="ARIUS 에이전트"))
+
+
+def _make_heartbeat(arius: Arius, on_event, *, session: Session | None = None) -> Heartbeat:
+    """A heartbeat with its own DB connection (it runs on another thread)."""
+    session = session or _agent_session(arius)
+    bg = Arius(arius.config, memory=Memory(arius._default_db_path(), embedder=arius.embedder), backend=arius.backend)
+    bg.notify = on_event
+    bg.confirm = lambda desc: False  # nobody to ask on a background thread: state changes need auto_allow
+    return Heartbeat(
+        lambda: bg.agent_loop(session),
+        bg.tool_context(session),
+        interval_minutes=arius.config.agent.interval_minutes,
+        on_event=on_event,
+        notify_discord=arius.config.agent.notify_discord,
+    )
+
+
+def _make_discord_chat(arius: Arius, on_event) -> DiscordChat | None:
+    d = arius.config.discord
+    if not d.resolved_token or not d.chat_channels:
+        on_event("디스코드 대화 모드에는 discord.bot_token(또는 ARIUS_DISCORD_TOKEN) 과 discord.chat_channels 가 필요합니다.")
+        return None
+    try:
+        role = Role.parse(d.chat_role)
+    except ValueError:
+        role = Role.USER
+    bg = Arius(arius.config, memory=Memory(arius._default_db_path(), embedder=arius.embedder), backend=arius.backend)
+    bg.notify = on_event
+
+    def reply(text: str, msg: dict) -> str:
+        author = msg.get("author") or {}
+        member = User(username=f"discord:{author.get('id', '?')}", role=role, display_name=author.get("global_name") or author.get("username") or "친구")
+        return bg.handle_for(Session(user=member), text, channel="discord").text
+
+    wake = list(arius.config.voice.wake_words) or [arius.config.assistant_name]
+    return DiscordChat(DiscordBot(d.resolved_token), reply, d.chat_channels, wake_words=wake,
+                       mention_only=d.chat_mention_only, poll_seconds=d.poll_seconds, on_event=on_event)
+
+
+def _wake_conversation(arius: Arius, voice: "_Voice", on_event) -> None:
+    """Foreground voice mode: listen for the wake word, converse, until Ctrl+C."""
+    if voice.stt is None:
+        voice.stt = SpeechToText(arius.config.voice.language)
+    if not voice.stt.available:
+        print(voice.stt.reason)
+        return
+    if voice.tts is None:
+        v = arius.config.voice
+        voice.tts = TextToSpeech(v.language, v.rate, v.voice_name)
+    if not voice.tts.available:
+        print(f"(음성 출력 없이 텍스트로 답합니다: {voice.tts.reason})")
+    wake = list(arius.config.voice.wake_words) or [arius.config.assistant_name]
+    conv = VoiceConversation(
+        voice.stt, voice.tts,
+        lambda q: arius.handle_for(arius.session, q, channel="voice").text,
+        wake, awake_seconds=arius.config.voice.awake_seconds, on_event=on_event,
+    )
+    try:
+        conv.run()
+    except KeyboardInterrupt:
+        print("\n음성 대화 모드를 종료합니다.")
 
 
 def _print_reply(assistant_name: str, reply_text: str) -> None:
@@ -111,14 +189,38 @@ def cmd_run(args: argparse.Namespace) -> int:
             pass
 
     print(BANNER)
-    print(f"{cfg.assistant_name} 준비 완료. 백엔드: {arius.backend.name}, 임베딩: {arius.embedder.name}. "
-          f"현재 사용자: {arius.current_user_label}.")
+    print(f"{cfg.assistant_name} 준비 완료. 백엔드: {arius.backend.name}, 임베딩: {arius.embedder.name}, "
+          f"에이전트: {cfg.agent.autonomy}. 현재 사용자: {arius.current_user_label}.")
     print(HELP_COMMANDS + "\n")
+
+    def event(msg: str) -> None:
+        print(f"\n[{cfg.assistant_name}] {msg}")
+        voice.say(msg) if msg.startswith(("🔴", "🟢", "⚠️")) else None
+
+    def confirm(desc: str) -> bool:
+        try:
+            ans = input(f"\n[에이전트] 실행할까요? {desc}\n  (y = 실행 / 그 외 = 거부) › ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return False
+        return ans in ("y", "yes", "ㅇ", "네", "예", "응")
+
+    arius.notify = event
+    arius.confirm = confirm
+    heartbeat: Heartbeat | None = None
+    discord_chat: DiscordChat | None = None
 
     if args.voice or cfg.voice.enabled:
         print(voice.enable_speech())
     if args.listen or cfg.voice.listen:
         print(voice.enable_listening())
+    if getattr(args, "agent", False) or cfg.agent.enabled:
+        heartbeat = _make_heartbeat(arius, event)
+        heartbeat.start()
+        print(f"에이전트 하트비트 시작 (매 {cfg.agent.interval_minutes}분, 자율 수준 {cfg.agent.autonomy}).")
+    if getattr(args, "discord", False):
+        discord_chat = _make_discord_chat(arius, event)
+        if discord_chat:
+            discord_chat.start()
 
     while True:
         line: str | None = None
@@ -163,6 +265,68 @@ def cmd_run(args: argparse.Namespace) -> int:
             n = arius.memory.reindex()
             print(f"기억 벡터를 재색인했습니다: {n}개 항목 (임베딩: {arius.embedder.name})")
             continue
+        if line.startswith("/agent"):
+            parts = line.split(maxsplit=2)
+            sub = parts[1].lower() if len(parts) > 1 else "status"
+            if sub in ("on", "off", "autonomy") and not arius.session.can("agent.manage"):
+                print("에이전트 설정 변경에는 'agent.manage' 권한(관리자 이상)이 필요합니다.")
+                continue
+            if sub == "run":
+                if not arius.session.can("agent.run"):
+                    print("'agent.run' 권한이 필요합니다.")
+                    continue
+                goal = parts[2] if len(parts) > 2 else ""
+                if goal:
+                    result = arius.run_agent(arius.session, goal)
+                    _print_reply(cfg.assistant_name, result.final + ("\n\n" + result.transcript() if result.steps else ""))
+                else:
+                    hb = heartbeat or _make_heartbeat(arius, event, session=arius.session)
+                    _print_reply(cfg.assistant_name, hb.run_once())
+            elif sub == "on":
+                if heartbeat is None:
+                    heartbeat = _make_heartbeat(arius, event)
+                heartbeat.start()
+                print(f"하트비트 시작 (매 {cfg.agent.interval_minutes}분).")
+            elif sub == "off":
+                if heartbeat:
+                    heartbeat.stop()
+                print("하트비트 중지.")
+            elif sub == "log":
+                rows = arius.memory.agent_log(15)
+                print("\n".join(f"  {_ts(r['ts'])} [{r['kind']}] {r['summary']}" for r in rows) or "  (기록 없음)")
+            elif sub == "autonomy":
+                level = parts[2].strip().lower() if len(parts) > 2 else ""
+                if level not in AUTONOMY_LEVELS:
+                    print(f"사용법: /agent autonomy {'|'.join(AUTONOMY_LEVELS)}")
+                else:
+                    cfg.agent.autonomy = level
+                    print(f"자율 수준을 '{level}' 로 바꿨습니다 (이 세션에만 적용; 영구 적용은 config.json).")
+            else:
+                running = heartbeat.running if heartbeat else False
+                print(f"에이전트: 자율 수준 {cfg.agent.autonomy}, 하트비트 {'실행 중' if running else '중지'}, "
+                      f"정책 {len(arius.memory.list_policies(enabled_only=True))}개, 자동 허용 도구: {', '.join(cfg.agent.auto_allow) or '없음'}")
+            continue
+        if line.startswith("/discord"):
+            sub = line.split(maxsplit=1)[1].strip().lower() if " " in line else "status"
+            if not arius.session.can("agent.manage"):
+                print("디스코드 대화 모드 제어에는 'agent.manage' 권한이 필요합니다.")
+                continue
+            if sub == "on":
+                if discord_chat is None:
+                    discord_chat = _make_discord_chat(arius, event)
+                if discord_chat:
+                    discord_chat.start()
+                    print("디스코드 대화 모드 시작.")
+            elif sub == "off":
+                if discord_chat:
+                    discord_chat.stop()
+                print("디스코드 대화 모드 중지.")
+            else:
+                print(f"디스코드 대화 모드: {'실행 중' if discord_chat and discord_chat.running else '중지'}")
+            continue
+        if line == "/wake":
+            _wake_conversation(arius, voice, event)
+            continue
         if line == "/commands":
             print(HELP_COMMANDS)
             continue
@@ -171,6 +335,69 @@ def cmd_run(args: argparse.Namespace) -> int:
         _print_reply(cfg.assistant_name, reply.text)
         voice.say(reply.text)
 
+    if heartbeat:
+        heartbeat.stop()
+    if discord_chat:
+        discord_chat.stop()
+    arius.close()
+    return 0
+
+
+def _ts(ts: float) -> str:
+    import time as _t
+    return _t.strftime("%m-%d %H:%M", _t.localtime(ts))
+
+
+def cmd_agent(args: argparse.Namespace) -> int:
+    """Headless daemon: heartbeat (+ Discord conversation) until Ctrl+C."""
+    import time as _t
+
+    arius = Arius.from_path(args.config)
+    cfg = arius.config
+
+    def event(msg: str) -> None:
+        print(f"[{_t.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+    if cfg.agent.autonomy != "autonomous":
+        event(f"주의: 자율 수준이 '{cfg.agent.autonomy}' 입니다. 데몬에는 승인해 줄 사람이 없어 "
+              "auto_allow 에 없는 변경 조치는 모두 거부됩니다. config.json 의 agent.autonomy 를 'autonomous' 로 두십시오.")
+    hb = _make_heartbeat(arius, event)
+    hb.start()
+    event(f"{cfg.assistant_name} 에이전트 데몬 시작 — 매 {cfg.agent.interval_minutes}분 점검, 백엔드 {arius.backend.name}, 서버 '{cfg.minecraft.name}'.")
+    chat = _make_discord_chat(arius, event) if (args.discord or cfg.discord.chat_channels) else None
+    if chat:
+        chat.start()
+    try:
+        while True:
+            _t.sleep(1)
+    except KeyboardInterrupt:
+        event("종료합니다.")
+    finally:
+        hb.stop()
+        if chat:
+            chat.stop()
+        arius.close()
+    return 0
+
+
+def cmd_listen(args: argparse.Namespace) -> int:
+    """Voice conversation mode: call the assistant by name, talk, repeat."""
+    arius = Arius.from_path(args.config)
+    cfg = arius.config
+    if len(cfg.users) == 1 and not cfg.users[0].passphrase_hash:
+        try:
+            arius.login(cfg.users[0].username)
+        except AuthenticationError:
+            pass
+    voice = _Voice(cfg)
+
+    def event(msg: str) -> None:
+        print(f"[{cfg.assistant_name}] {msg}", flush=True)
+
+    arius.notify = event
+    print(BANNER)
+    print(f"음성 대화 모드 — 현재 사용자: {arius.current_user_label}")
+    _wake_conversation(arius, voice, event)
     arius.close()
     return 0
 
@@ -288,7 +515,16 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--no-autologin", action="store_true", help="단일 오너 자동 로그인 비활성화")
     run_p.add_argument("--voice", action="store_true", help="답변을 음성으로 읽어주기 (TTS)")
     run_p.add_argument("--listen", action="store_true", help="마이크로 입력 받기 (STT)")
+    run_p.add_argument("--agent", action="store_true", help="자율 에이전트 하트비트를 함께 시작")
+    run_p.add_argument("--discord", action="store_true", help="디스코드 대화 모드를 함께 시작")
     run_p.set_defaults(func=cmd_run)
+
+    agent_p = sub.add_parser("agent", help="헤드리스 에이전트 데몬 (하트비트 + 디스코드 대화)")
+    agent_p.add_argument("--discord", action="store_true", help="디스코드 대화 모드도 실행")
+    agent_p.set_defaults(func=cmd_agent)
+
+    listen_p = sub.add_parser("listen", help="이름을 부르면 대답하는 음성 대화 모드")
+    listen_p.set_defaults(func=cmd_listen)
 
     init_p = sub.add_parser("init", help="config 생성 및 오너 계정 설정")
     init_p.add_argument("--force", action="store_true", help="기존 config 덮어쓰기")
@@ -318,6 +554,8 @@ def main(argv: list[str] | None = None) -> int:
         args.no_autologin = False
         args.voice = False
         args.listen = False
+        args.agent = False
+        args.discord = False
     return args.func(args)
 
 

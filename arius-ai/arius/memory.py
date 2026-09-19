@@ -62,6 +62,19 @@ CREATE TABLE IF NOT EXISTS knowledge (
     ts       REAL NOT NULL,
     UNIQUE(username, url)
 );
+CREATE TABLE IF NOT EXISTS policies (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    text     TEXT NOT NULL,
+    enabled  INTEGER NOT NULL DEFAULT 1,
+    ts       REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_log (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts       REAL NOT NULL,
+    kind     TEXT NOT NULL,           -- 'heartbeat' | 'task' | 'action' | 'denied' | 'error'
+    summary  TEXT NOT NULL,
+    detail   TEXT NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS vectors (
     kind     TEXT NOT NULL,          -- 'fact' | 'knowledge'
     username TEXT NOT NULL,
@@ -281,6 +294,55 @@ class Memory:
                 ranked.append(doc)
         ranked.sort(key=lambda d: (-d.score, -d.ts))
         return ranked[:limit]
+
+    # -- agent: policies & log --------------------------------------------
+    def add_policy(self, text: str) -> int:
+        cur = self._conn.execute(
+            "INSERT INTO policies (text, enabled, ts) VALUES (?, 1, ?)", (text.strip(), time.time())
+        )
+        self._conn.commit()
+        return int(cur.lastrowid)
+
+    def list_policies(self, enabled_only: bool = False) -> list[dict]:
+        sql = "SELECT id, text, enabled, ts FROM policies"
+        if enabled_only:
+            sql += " WHERE enabled = 1"
+        rows = self._conn.execute(sql + " ORDER BY id").fetchall()
+        return [dict(r) for r in rows]
+
+    def set_policy_enabled(self, policy_id: int, enabled: bool) -> bool:
+        cur = self._conn.execute("UPDATE policies SET enabled = ? WHERE id = ?", (1 if enabled else 0, policy_id))
+        self._conn.commit()
+        return cur.rowcount > 0
+
+    def remove_policy(self, policy_id: int) -> bool:
+        cur = self._conn.execute("DELETE FROM policies WHERE id = ?", (policy_id,))
+        self._conn.commit()
+        return cur.rowcount > 0
+
+    def seed_policies(self, texts: list[str]) -> int:
+        """Insert config policies that are not stored yet. Returns how many were added."""
+        existing = {p["text"] for p in self.list_policies()}
+        added = 0
+        for t in texts:
+            t = t.strip()
+            if t and t not in existing:
+                self.add_policy(t)
+                added += 1
+        return added
+
+    def log_agent(self, kind: str, summary: str, detail: str = "") -> None:
+        self._conn.execute(
+            "INSERT INTO agent_log (ts, kind, summary, detail) VALUES (?, ?, ?, ?)",
+            (time.time(), kind, summary, detail),
+        )
+        self._conn.commit()
+
+    def agent_log(self, limit: int = 20) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT ts, kind, summary, detail FROM agent_log ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in reversed(rows)]
 
     # -- vector index -------------------------------------------------------
     def _index_fact(self, username: str, key: str, value: str) -> None:

@@ -29,6 +29,8 @@ class SkillContext:
     config: AriusConfig
     permissions: PermissionManager
     registry: "SkillRegistry"
+    tools: object | None = None  # arius.agent.tools.ToolContext when available
+    agent: object | None = None  # callable(goal) -> report, runs the agent loop
 
 
 class Skill(ABC):

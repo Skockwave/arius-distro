@@ -13,9 +13,13 @@ Routing for each input:
 
 from __future__ import annotations
 
+import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from arius.config import AriusConfig, load_config
+from arius.agent.loop import AgentLoop, AgentResult
+from arius.agent.tools import ToolContext, build_registry
 from arius.embeddings import build_embedder
 from arius.llm import LLMBackend, Message, build_backend
 from arius.memory import Memory
@@ -60,6 +64,12 @@ class Arius:
         self.backend = backend or build_backend(self.config)
         self.registry = registry or SkillRegistry(default_skills())
         self.session: Session = self.permissions.guest_session()
+        self.tools = build_registry()
+        # Set by the front end: how to ask a human before a state-changing tool runs,
+        # and where agent progress lines go. Defaults are safe (deny / silent).
+        self.confirm: Callable[[str], bool] = lambda desc: False
+        self.notify: Callable[[str], None] = lambda msg: None
+        self.memory.seed_policies(self.config.agent.policies)
 
     # -- construction helpers ------------------------------------------------
     @classmethod
@@ -89,42 +99,90 @@ class Arius:
 
     # -- main entry point ----------------------------------------------------
     def handle(self, text: str) -> Reply:
+        return self.handle_for(self.session, text, channel="console")
+
+    def handle_for(self, session: Session, text: str, channel: str = "console") -> Reply:
+        """Answer on behalf of any session (REPL, Discord member, voice)."""
         text = (text or "").strip()
         if not text:
             return Reply("무슨 말씀이신지 다시 한 번 말씀해 주십시오.", "system")
 
         skill = self.registry.find(text)
         if skill is not None:
-            if not self.session.can(skill.capability):
+            if not session.can(skill.capability):
                 return Reply(
-                    self._refusal(skill.capability),
+                    self._refusal(skill.capability, session),
                     f"denied:{skill.name}",
                 )
             ctx = SkillContext(
-                session=self.session,
+                session=session,
                 memory=self.memory,
                 config=self.config,
                 permissions=self.permissions,
                 registry=self.registry,
+                tools=self.tool_context(session),
+                agent=lambda goal, _s=session: self.run_agent(_s, goal).final,
             )
             try:
                 result = skill.run(ctx, text)
             except AccessDenied as exc:
                 return Reply(str(exc), f"denied:{skill.name}")
-            self.memory.add_message(self.session.user.username, "user", text)
-            self.memory.add_message(self.session.user.username, "assistant", result)
+            self.memory.add_message(session.user.username, "user", text)
+            self.memory.add_message(session.user.username, "assistant", result)
             return Reply(result, f"skill:{skill.name}")
 
-        return self._chat(text)
+        if (
+            self.config.agent.route_chat
+            and self.backend.name != "echo"
+            and self.is_agent_request(text)
+            and session.can("agent.run")
+        ):
+            result = self.run_agent(session, text)
+            self.memory.add_message(session.user.username, "user", text)
+            self.memory.add_message(session.user.username, "assistant", result.final)
+            return Reply(result.final, "agent")
+
+        return self._chat(text, session, channel)
+
+    # -- autonomous agent ---------------------------------------------------
+    _AGENT_TRIGGER = re.compile(
+        r"(^/do\b|^작업\s*[:：]|(줘|주세요|주라|해\s*봐|해라|해줄래|할래|해\s*주게|부탁해)\s*[.!~?]*$)"
+    )
+
+    @classmethod
+    def is_agent_request(cls, text: str) -> bool:
+        return bool(cls._AGENT_TRIGGER.search(text.strip()))
+
+    def tool_context(self, session: Session | None = None) -> ToolContext:
+        return ToolContext(config=self.config, memory=self.memory, session=session or self.session, notify=self.notify)
+
+    def agent_loop(self, session: Session | None = None, **overrides) -> AgentLoop:
+        a = self.config.agent
+        kwargs = dict(
+            autonomy=a.autonomy,
+            max_steps=a.max_steps,
+            auto_allow=a.auto_allow,
+            confirm=self.confirm,
+            on_event=self.notify,
+            persona=f"당신은 '{self.config.assistant_name}'입니다. {self.config.persona.style_notes}",
+        )
+        kwargs.update(overrides)
+        return AgentLoop(self.backend, self.tools, self.tool_context(session), **kwargs)
+
+    def run_agent(self, session: Session, goal: str, context_note: str = "") -> AgentResult:
+        goal = re.sub(r"^(/do\b|작업\s*[:：])\s*", "", goal.strip())
+        self.memory.log_agent("task", goal[:200])
+        return self.agent_loop(session).run(goal, context_note)
 
     # -- conversation --------------------------------------------------------
-    def _chat(self, text: str) -> Reply:
-        username = self.session.user.username
+    def _chat(self, text: str, session: Session | None = None, channel: str = "console") -> Reply:
+        session = session or self.session
+        username = session.user.username
         recalled = []
-        if self.session.can("memory.read"):
+        if session.can("memory.read"):
             recalled = self.memory.recall_facts(username, text, limit=4)
 
-        system = build_system_prompt(self.config, self.session, recalled)
+        system = build_system_prompt(self.config, session, recalled, channel=channel)
         history = self.memory.recent_messages(username, limit=10)
         messages = [Message(role=m["role"], content=m["content"]) for m in history if m["role"] in ("user", "assistant")]
         messages.append(Message(role="user", content=text))
@@ -143,11 +201,12 @@ class Arius:
         return Reply(reply_text, f"llm:{self.backend.name}")
 
     # -- helpers -------------------------------------------------------------
-    def _refusal(self, capability: str) -> str:
+    def _refusal(self, capability: str, session: Session | None = None) -> str:
+        session = session or self.session
         return (
             f"죄송하지만 그 작업에는 '{capability}' 권한이 필요합니다. "
-            f"현재 {self.session.user.display_name}{self.config.persona.honorific}의 "
-            f"등급은 '{self.session.role.label}'이라 실행할 수 없습니다. "
+            f"현재 {session.user.display_name}{self.config.persona.honorific}의 "
+            f"등급은 '{session.role.label}'이라 실행할 수 없습니다. "
             "권한이 있는 계정으로 로그인하시거나 오너에게 권한 상향을 요청하십시오."
         )
 

@@ -178,3 +178,91 @@ class SpeechToText:
         except sr.RequestError as exc:
             self.reason = f"음성 인식 서비스 오류: {exc}"
             return None
+
+
+# --- Wake-word conversation ---------------------------------------------------------
+
+import threading as _threading
+import time as _time
+from collections.abc import Callable as _Callable
+
+_STRIP = re.compile(r"[\s\.\,\!\?\~\-\_\'\"\(\)\[\]…·]+")
+
+
+def _norm(text: str) -> str:
+    return _STRIP.sub("", (text or "").lower())
+
+
+class VoiceConversation:
+    """Keep listening; answer when called by name, then stay awake for follow-ups."""
+
+    def __init__(
+        self,
+        stt: SpeechToText,
+        tts: TextToSpeech,
+        respond: _Callable[[str], str],
+        wake_words: list[str],
+        *,
+        awake_seconds: int = 20,
+        on_event: _Callable[[str], None] | None = None,
+        ack_phrase: str = "네, 듣고 있어요.",
+    ) -> None:
+        self.stt = stt
+        self.tts = tts
+        self.respond = respond
+        self.wake_words = [w for w in wake_words if w]
+        self.awake_seconds = max(0, int(awake_seconds))
+        self.on_event = on_event or (lambda m: None)
+        self.ack_phrase = ack_phrase
+        self._awake_until = 0.0
+
+    def detect_wake(self, heard: str) -> tuple[bool, str]:
+        """(called?, remaining text). Matching ignores spaces/punctuation, so
+        '아리 우스' and '아리우스!' both count."""
+        n = _norm(heard)
+        for w in self.wake_words:
+            wn = _norm(w)
+            if wn and wn in n:
+                remainder = re.sub(re.escape(w), " ", heard, flags=re.IGNORECASE)
+                # also strip a spaced-out rendering of the name
+                remainder = re.sub(r"\s*".join(map(re.escape, w)), " ", remainder, flags=re.IGNORECASE)
+                return True, " ".join(remainder.split()).strip(" ,.!?~")
+        return False, heard
+
+    @property
+    def awake(self) -> bool:
+        return _time.monotonic() < self._awake_until
+
+    def handle_utterance(self, heard: str) -> str | None:
+        """One transcript in → spoken reply (or None if it was not for us)."""
+        called, query = self.detect_wake(heard)
+        if not called and not self.awake:
+            return None
+        if called and not query:
+            self._awake_until = _time.monotonic() + self.awake_seconds
+            self.on_event("호출됨 — 대기 중")
+            self.tts.speak(self.ack_phrase)
+            return self.ack_phrase
+        reply = self.respond(query or heard)
+        self._awake_until = _time.monotonic() + self.awake_seconds
+        self.on_event(f"나: {query or heard}")
+        self.on_event(f"답: {reply[:80]}")
+        self.tts.speak(reply)
+        return reply
+
+    def run(self, stop_event: _threading.Event | None = None) -> None:
+        stop_event = stop_event or _threading.Event()
+        self.on_event(f"듣는 중… '{', '.join(self.wake_words)}' 라고 부르면 대답합니다. (Ctrl+C 로 종료)")
+        while not stop_event.is_set():
+            heard = self.stt.listen()
+            if heard is None:
+                if self.stt.reason and "마이크" in self.stt.reason:
+                    self.on_event(self.stt.reason)
+                    return
+                continue
+            if not heard:
+                continue
+            try:
+                self.handle_utterance(heard)
+            except Exception as exc:  # keep listening whatever happens
+                self.on_event(f"응답 오류: {exc}")

@@ -313,6 +313,164 @@ class WebRecallSkill(Skill):
         return "\n".join(lines)
 
 
+def _tool(ctx: SkillContext, name: str, args: dict | None = None) -> str:
+    """Run one agent tool directly (a human typed the command, so no autonomy gate —
+    RBAC was already checked by the skill's capability)."""
+    from arius.agent.tools import Refused, build_registry
+
+    if ctx.tools is None:
+        return "도구 컨텍스트가 없습니다."
+    tool = build_registry().get(name)
+    if tool is None:
+        return f"알 수 없는 도구: {name}"
+    try:
+        return tool.handler(ctx.tools, args or {})
+    except Refused as exc:
+        return f"거부됨 — {exc}"
+
+
+class MinecraftSkill(Skill):
+    name = "minecraft"
+    description = "서버 상태/로그/플레이어, 콘솔 명령, 채팅 공지, 시작. 예: '서버 상태', '서버 로그 오류', '서버 명령: list' (권한: mc.read / mc.admin)"
+    capability = perm.CAP_MC_READ
+    priority = 33
+
+    _status = re.compile(r"^(?:/mc\s*(?:status)?|서버\s*(?:상태|켜져|온라인|살아)|접속자|서버\s*정보)", re.IGNORECASE)
+    _log = re.compile(r"^(?:/mc\s*log|서버\s*로그)\s*(?P<pat>.*)$", re.IGNORECASE)
+    _cmd = re.compile(r"^(?:/rcon|서버\s*명령)\s*[:：]?\s*(?P<cmd>.+)$", re.IGNORECASE)
+    _say = re.compile(r"^(?:서버\s*(?:공지|채팅|말해))\s*[:：]?\s*(?P<msg>.+)$", re.IGNORECASE)
+    _start = re.compile(r"^(?:서버\s*(?:시작|켜|켜줘|켜 줘|기동))", re.IGNORECASE)
+    _stop = re.compile(r"^(?:서버\s*(?:중지|정지|꺼|끄기)\s*확인)", re.IGNORECASE)
+    _restart = re.compile(r"^(?:서버\s*재시작\s*확인)", re.IGNORECASE)
+    _rcon_setup = re.compile(r"^(?:RCON\s*(?:설정|켜기|활성화))\s*[:：]?\s*(?P<pw>\S+)?", re.IGNORECASE)
+
+    def matches(self, text: str) -> bool:
+        t = text.strip()
+        return any(rx.match(t) for rx in (self._status, self._log, self._cmd, self._say, self._start, self._stop, self._restart, self._rcon_setup))
+
+    def run(self, ctx: SkillContext, text: str) -> str:
+        t = text.strip()
+        admin = ctx.session.can(perm.CAP_MC_ADMIN)
+        need_admin = "그 작업에는 'mc.admin' 권한이 필요합니다."
+        if self._status.match(t):
+            return _tool(ctx, "minecraft_status")
+        m = self._log.match(t)
+        if m:
+            pat = m.group("pat").strip()
+            pattern = {"오류": "WARN|ERROR", "에러": "ERROR", "경고": "WARN", "접속": "joined|left"}.get(pat, pat)
+            return _tool(ctx, "minecraft_log", {"lines": 40, "pattern": pattern})
+        if not admin:
+            return need_admin
+        m = self._cmd.match(t)
+        if m:
+            return _tool(ctx, "minecraft_command", {"command": m.group("cmd")})
+        m = self._say.match(t)
+        if m:
+            return _tool(ctx, "minecraft_say", {"message": m.group("msg")})
+        if self._start.match(t):
+            return _tool(ctx, "minecraft_start", {"wait": False})
+        if self._stop.match(t):
+            return _tool(ctx, "minecraft_stop", {"warning": "관리자가 서버를 곧 중지합니다.", "delay": 5})
+        if self._restart.match(t):
+            return _tool(ctx, "minecraft_restart", {"wait": False})
+        m = self._rcon_setup.match(t)
+        if m:
+            return _tool(ctx, "minecraft_enable_rcon", {"password": m.group("pw") or ""})
+        return "이해하지 못했습니다."
+
+
+class DiscordSkill(Skill):
+    name = "discord"
+    description = "디스코드 공지 초안/전송, 최근 대화. 예: '공지 초안: 오늘 22시 점검', '공지 전송: ...' (권한: discord.announce)"
+    capability = perm.CAP_DISCORD_ANNOUNCE
+    priority = 34
+
+    _draft = re.compile(r"^(?:공지\s*초안|디스코드\s*초안)\s*[:：]\s*(?P<body>.+)$", re.IGNORECASE | re.DOTALL)
+    _send = re.compile(r"^(?:공지\s*전송|디스코드\s*공지|디스코드\s*전송)\s*[:：]\s*(?P<body>.+)$", re.IGNORECASE | re.DOTALL)
+    _recent = re.compile(r"^(?:디스코드\s*(?:최근|대화|메시지))", re.IGNORECASE)
+
+    def matches(self, text: str) -> bool:
+        t = text.strip()
+        return any(rx.match(t) for rx in (self._draft, self._send, self._recent))
+
+    def run(self, ctx: SkillContext, text: str) -> str:
+        from arius.discord import format_announcement
+
+        t = text.strip()
+        m = self._draft.match(t)
+        if m:
+            title, body = _split_title(m.group("body"))
+            preview = format_announcement(title, body, ctx.config.minecraft.name)
+            return "공지 초안입니다 (보내려면 '공지 전송: …'):\n" + preview
+        m = self._send.match(t)
+        if m:
+            title, body = _split_title(m.group("body"))
+            return _tool(ctx, "discord_announce", {"title": title, "body": body})
+        if self._recent.match(t):
+            return _tool(ctx, "discord_recent", {"limit": 10})
+        return "이해하지 못했습니다."
+
+
+def _split_title(text: str) -> tuple[str, str]:
+    """'제목 | 본문' or first line as title when multi-line; else no title."""
+    text = text.strip()
+    if "|" in text:
+        title, _, body = text.partition("|")
+        return title.strip(), body.strip()
+    if "\n" in text:
+        title, _, body = text.partition("\n")
+        return title.strip(), body.strip()
+    return "", text
+
+
+class AgentSkill(Skill):
+    name = "agent"
+    description = "자율 에이전트에게 일을 맡깁니다. 예: '작업: 서버 로그에서 오류 찾아서 요약해줘', '/do …' (권한: agent.run)"
+    capability = perm.CAP_AGENT_RUN
+    priority = 36
+
+    _pat = re.compile(r"^(?:/do\b|작업\s*[:：])\s*(?P<goal>.+)$", re.IGNORECASE | re.DOTALL)
+
+    def matches(self, text: str) -> bool:
+        return bool(self._pat.match(text.strip()))
+
+    def run(self, ctx: SkillContext, text: str) -> str:
+        m = self._pat.match(text.strip())
+        assert m
+        if ctx.agent is None:
+            return "에이전트를 사용할 수 없습니다."
+        return ctx.agent(m.group("goal"))
+
+
+class PolicySkill(Skill):
+    name = "policy"
+    description = "에이전트 상시 정책 관리. 예: '정책 추가: 서버 꺼지면 다시 켜고 디스코드에 알려', '정책 목록', '정책 삭제 2' (권한: agent.manage)"
+    capability = perm.CAP_AGENT_MANAGE
+    priority = 37
+
+    _add = re.compile(r"^정책\s*(?:추가|등록)\s*[:：]\s*(?P<text>.+)$", re.IGNORECASE | re.DOTALL)
+    _list = re.compile(r"^정책\s*(?:목록|리스트|보기)", re.IGNORECASE)
+    _del = re.compile(r"^정책\s*(?:삭제|제거)\s*(?P<id>\d+)", re.IGNORECASE)
+
+    def matches(self, text: str) -> bool:
+        t = text.strip()
+        return any(rx.match(t) for rx in (self._add, self._list, self._del))
+
+    def run(self, ctx: SkillContext, text: str) -> str:
+        t = text.strip()
+        m = self._add.match(t)
+        if m:
+            pid = ctx.memory.add_policy(m.group("text"))
+            return f"정책 #{pid} 을 추가했습니다: {m.group('text').strip()}"
+        m = self._del.match(t)
+        if m:
+            return "삭제했습니다." if ctx.memory.remove_policy(int(m.group("id"))) else "해당 번호의 정책이 없습니다."
+        rows = ctx.memory.list_policies()
+        if not rows:
+            return "등록된 정책이 없습니다. '정책 추가: …' 로 등록하십시오."
+        return "상시 정책:\n" + "\n".join(f"  #{r['id']} {'✅' if r['enabled'] else '⏸'} {r['text']}" for r in rows)
+
+
 class ExecSkill(Skill):
     """Run a shell command. Highest-privilege skill; gated by system.exec."""
 
@@ -398,6 +556,10 @@ def default_skills() -> list[Skill]:
         LearnSkill(),
         RecallSkill(),
         ListFactsSkill(),
+        MinecraftSkill(),
+        DiscordSkill(),
+        AgentSkill(),
+        PolicySkill(),
         WebLearnSkill(),
         WebRecallSkill(),
         ProjectSkill(),

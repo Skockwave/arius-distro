@@ -14,7 +14,8 @@
   "persona": {
     "honorific": "님",
     "tone": "formal",
-    "style_notes": "차분하고 정중하며 유능하다. 군더더기 없이 핵심을 말하고, 필요하면 먼저 제안한다."
+    "style_notes": "차분하고 정중하며 유능하다. 군더더기 없이 핵심을 말하고, 필요하면 먼저 제안한다.",
+    "emotional": true
   },
   "embeddings": {
     "backend": "hashing",
@@ -27,7 +28,72 @@
     "listen": false,
     "language": "ko-KR",
     "rate": 180,
-    "voice_name": ""
+    "voice_name": "",
+    "wake_words": [
+      "아리우스",
+      "자비스"
+    ],
+    "awake_seconds": 20
+  },
+  "agent": {
+    "enabled": false,
+    "autonomy": "supervised",
+    "interval_minutes": 10,
+    "max_steps": 8,
+    "route_chat": true,
+    "notify_discord": false,
+    "policies": [
+      "서버가 꺼지면 다시 켜고 디스코드에 공지해",
+      "디스크 85% 넘으면 알려줘",
+      "서버 로그에 ERROR 가 반복되면 디스코드 운영 채널에 요약해서 알려줘"
+    ],
+    "read_paths": [],
+    "auto_allow": [
+      "discord_announce",
+      "minecraft_say",
+      "minecraft_command",
+      "minecraft_start",
+      "remember"
+    ],
+    "rcon_allow": [
+      "list",
+      "tps",
+      "save-all",
+      "say",
+      "tell",
+      "msg",
+      "whitelist",
+      "kick",
+      "time",
+      "weather",
+      "seed",
+      "version",
+      "plugins"
+    ]
+  },
+  "minecraft": {
+    "name": "메테노서버",
+    "host": "localhost",
+    "port": 25565,
+    "server_dir": "",
+    "rcon_host": "",
+    "rcon_port": 25575,
+    "rcon_password": "",
+    "rcon_password_env": "ARIUS_RCON_PASSWORD",
+    "distribution_path": "../distribution.json",
+    "start_command": ""
+  },
+  "discord": {
+    "webhook_url": "",
+    "webhook_url_env": "ARIUS_DISCORD_WEBHOOK",
+    "bot_token": "",
+    "bot_token_env": "ARIUS_DISCORD_TOKEN",
+    "channel_id": "",
+    "username": "ARIUS",
+    "chat_channels": [],
+    "chat_mention_only": true,
+    "chat_role": "user",
+    "poll_seconds": 4
   },
   "users": [
     {
