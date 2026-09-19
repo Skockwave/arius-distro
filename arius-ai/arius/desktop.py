@@ -140,7 +140,7 @@ class Desktop:
             ok = self._browser(url)
         except Exception as exc:
             return f"실행하지 않았습니다.\n이유: 브라우저를 열 수 없습니다 ({exc}).\n다음 조치: 기본 브라우저 설정을 확인해 주세요."
-        return f"완료했습니다. 브라우저에서 열었습니다: {url}" if ok is not False else f"실행하지 않았습니다.\n이유: 브라우저가 응답하지 않았습니다.\n다음 조치: 기본 브라우저 설정을 확인해 주세요."
+        return f"완료했습니다. 브라우저에서 열었습니다: {url}" if ok is not False else "실행하지 않았습니다.\n이유: 브라우저가 응답하지 않았습니다.\n다음 조치: 기본 브라우저 설정을 확인해 주세요."
 
     def open_path(self, target: str) -> str:
         folder = self.resolve_folder(target)

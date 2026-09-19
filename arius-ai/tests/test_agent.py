@@ -14,7 +14,7 @@ from arius.discord import DiscordClient
 from arius.llm.base import LLMBackend
 from arius.memory import Memory
 from arius.minecraft import ServerStatus
-from arius.permissions import PermissionManager, Role, Session, User
+from arius.permissions import PermissionManager
 
 
 class ScriptedBackend(LLMBackend):

@@ -27,6 +27,7 @@ def test_macos_writes_launchagent_and_loads_it():
     calls = []
     auto, home = _auto("Darwin", calls)
     msg = auto.enable(["agent"])
+    assert "등록했습니다" in msg
     plist = auto.entry_path()
     assert plist.exists() and plist.name == "com.arius.agent.plist"
     text = plist.read_text(encoding="utf-8")
