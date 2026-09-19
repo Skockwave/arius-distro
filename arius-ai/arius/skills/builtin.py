@@ -453,6 +453,8 @@ def inspect_server(ctx: SkillContext) -> str:
     # 3. TPS
     tps_line = "RCON 미설정 — 'RCON 설정: <암호>' 후 확인 가능"
     if status.online:
+        from arius.agent.tools import Refused
+
         try:
             with tc.rcon() as r:
                 raw = r.command("tps")
@@ -469,8 +471,11 @@ def inspect_server(ctx: SkillContext) -> str:
                     yellow.append(f"TPS {tps:.1f} — 약간의 렉")
             else:
                 tps_line = raw.strip()[:80] or "(출력 없음)"
-        except Exception as exc:  # Refused / RconError
-            tps_line = str(exc).splitlines()[0][:90]
+        except Refused:
+            pass  # no RCON password configured: keep the "RCON 미설정" hint above
+        except Exception as exc:  # RconError: RCON on but unreachable / wrong password
+            tps_line = "🟡 확인 불가 — " + str(exc).splitlines()[0][:90]
+            yellow.append("TPS 확인 불가 — RCON 포트·암호와 서버 재시작 여부를 확인하세요")
     lines.append(f"3. TPS: {tps_line}")
     # 4. CPU / RAM
     cpu = snap.get("cpu", {})
