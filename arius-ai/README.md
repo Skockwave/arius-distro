@@ -97,6 +97,8 @@ python main.py          # 실행
 - **한글이 깨짐** → `run.bat` / `run.sh`로 실행하십시오(UTF-8 자동 설정). 직접 실행 시엔 Windows에서 `chcp 65001` 후 실행.
 - **`/exec` 명령이 Windows에서 안 됨** → `dir`, `echo` 같은 cmd 내장 명령도 지원합니다. 오너/관리자 등급인지 `/whoami`로 확인하십시오.
 - **가상환경 생성 실패(Ubuntu)** → `sudo apt install python3-venv` 후 재실행. 실패해도 시스템 Python으로 계속 동작합니다.
+- **시작하면 "게스트"로 뜸** → 오너 계정에 암호가 걸려 있어 시작 시 암호 입력에서 Enter 를 친 경우입니다. `/login <아이디>` 로 로그인하거나, 암호를 없애 자동 로그인하려면 **`run.bat passwd --clear`** (`python main.py passwd --clear`).
+- **답변에 "(참고: 지금은 오프라인 응답 모드…)" 가 붙음** → 실제 언어 모델이 연결되지 않은 상태입니다. 로컬 모델은 Ollama 설치 → `ollama pull exaone3.5` → **`run.bat backend ollama exaone3.5`**, 클라우드는 API 키 저장 후 **`run.bat backend anthropic`**. 이 명령이 config 를 고치고 무엇이 빠졌는지 바로 알려줍니다. (`backend: ollama` 인데 모델이 `claude-…` 로 남아 있어도 이 명령이 정리합니다.)
 
 `init` 없이 바로 체험만 하려면 예제 설정을 복사하세요:
 
@@ -199,7 +201,9 @@ AI가 "권한에 따라 통제된다"는 요구를 이렇게 구현했습니다.
 | `/exec echo hi`, `명령 실행: ls` | 셸 명령 실행 (위험) | system.exec |
 | 그 외 아무 말 | 자유 대화(LLM) | chat |
 
-세션 명령: `/login <아이디>`, `/logout`, `/quit`. 음성: `/voice on|off`, `/listen`, `/wake`. 에이전트: `/agent run|on|off|log|autonomy`, `정책 추가/목록/삭제`. 디스코드: `/discord on|off`. 기타: `/reindex`.
+세션 명령: `/login <아이디>`, `/logout`, `/quit`. 음성: `/voice on|off`, `/listen`, `/wake`. 모드: `/mode`. 에이전트: `/agent run|on|off|log|autonomy`, `정책 추가/목록/삭제`. 디스코드: `/discord on|off`. 기타: `/reindex`.
+
+터미널 명령(`run.bat …` 또는 `python main.py …`): `init`(설정 생성), `passwd [--clear]`(암호 설정/제거), `backend ollama|anthropic|echo [모델]`(추론 백엔드 전환+점검), `setup voice|check`, `listen`, `agent`, `autostart enable|disable|status`.
 
 ---
 
@@ -218,7 +222,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."   # Windows: set ANTHROPIC_API_KEY=...
 "llm": { "backend": "anthropic", "model": "claude-sonnet-5" }
 ```
 
-키가 없거나 패키지가 없으면 자동으로 오프라인 모드로 **안전하게 되돌아갑니다** (비서는 계속 동작).
+키가 없거나 패키지가 없으면 자동으로 오프라인 모드로 **안전하게 되돌아갑니다** (비서는 계속 동작). 전환과 점검을 한 번에: `run.bat backend anthropic` (키는 환경 변수 `ANTHROPIC_API_KEY` 에만 두고 config 나 대화에 넣지 마십시오).
 
 ### 또는 로컬 모델로 (Ollama — 무료, 완전 오프라인, API 키 없음)
 
@@ -229,11 +233,12 @@ export ANTHROPIC_API_KEY="sk-ant-..."   # Windows: set ANTHROPIC_API_KEY=...
    ollama pull exaone3.5     # 한국어에 강함 (LG AI연구원)
    ollama pull qwen2.5       # 한국어 포함 다국어 우수
    ```
-3. `config.json`:
-   ```json
-   "llm": { "backend": "ollama", "model": "exaone3.5" }
+3. 한 줄로 전환 + 점검:
    ```
-   (`python main.py init` 에서 "3) 로컬 모델"을 고르면 자동으로 설정됩니다.)
+   run.bat backend ollama exaone3.5        # macOS/Linux: python main.py backend ollama exaone3.5
+   ```
+   config 의 `"llm": { "backend": "ollama", "model": "exaone3.5" }` 를 써 주고, Ollama 서버 연결과 모델 준비 여부를 ✅/⚠️ 로 알려줍니다. (`python main.py init` 에서 "3) 로컬 모델"을 골라도 됩니다.)
+   메모리가 8GB 면 `exaone3.5:2.4b` 나 `qwen2.5:3b` 처럼 작은 태그를 권장합니다.
 
 추가 파이썬 패키지는 필요 없습니다 — `localhost:11434` 로 직접 통신합니다. 서버가 꺼져 있거나 모델을 안 받았으면 **무엇을 하면 되는지 알려주고** 오프라인 모드로 계속 동작합니다:
 

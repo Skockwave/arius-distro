@@ -425,3 +425,59 @@ def test_voice_ack_and_unclear_phrases_follow_the_rules():
     assert vc.handle_utterance("자비스") == "네, 말씀하세요."
     assert vc.handle_unclear() == "잘 듣지 못했습니다. 다시 말씀해 주시겠어요?"
     assert spoken == ["네, 말씀하세요.", "잘 듣지 못했습니다. 다시 말씀해 주시겠어요?"]
+
+
+# --- CLI: passwd / backend ------------------------------------------------------------------
+
+
+def _write_cfg(tmp, users, backend="echo"):
+    cfg = AriusConfig(users=users)
+    cfg.llm.backend = backend
+    path = Path(tmp, "config.json")
+    path.write_text(json.dumps(config_to_dict(cfg), ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_passwd_clear_and_set(monkeypatch, capsys):
+    from arius import cli
+    from arius.permissions import hash_passphrase, verify_passphrase
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_cfg(tmp, [UserConfig("owner", "owner", "형", hash_passphrase("old")), UserConfig("friend", "user")])
+        assert cli.main(["-c", str(path), "passwd", "--clear"]) == 0
+        cfg = _coerce(json.loads(path.read_text(encoding="utf-8")))
+        assert cfg.user("owner").passphrase_hash == ""
+        assert "자동으로 owner" in capsys.readouterr().out
+        answers = iter(["new", "new"])
+        monkeypatch.setattr(cli.getpass, "getpass", lambda prompt="": next(answers))
+        assert cli.main(["-c", str(path), "passwd", "--user", "friend"]) == 0
+        cfg = _coerce(json.loads(path.read_text(encoding="utf-8")))
+        assert verify_passphrase("new", cfg.user("friend").passphrase_hash)
+        answers = iter(["a", "b"])
+        assert cli.main(["-c", str(path), "passwd"]) == 1  # mismatch: nothing changed
+        assert cli.main(["-c", str(path), "passwd", "--user", "nobody"]) == 1
+
+
+def test_backend_switch_writes_config_and_diagnoses(monkeypatch, capsys):
+    from arius import cli
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_cfg(tmp, [UserConfig("owner", "owner")])
+        monkeypatch.setattr(cli, "_probe_ollama", lambda url, model: f"모델 '{model}'이(가) 준비되어 있지 않습니다. `ollama pull {model}`")
+        assert cli.main(["-c", str(path), "backend", "ollama", "exaone3.5"]) == 1
+        out = capsys.readouterr().out
+        assert "ollama pull exaone3.5" in out
+        cfg = _coerce(json.loads(path.read_text(encoding="utf-8")))
+        assert cfg.llm.backend == "ollama" and cfg.llm.model == "exaone3.5"
+        monkeypatch.setattr(cli, "_probe_ollama", lambda url, model: None)
+        assert cli.main(["-c", str(path), "backend", "ollama"]) == 0
+        assert "✅ Ollama" in capsys.readouterr().out
+        assert _coerce(json.loads(path.read_text(encoding="utf-8"))).llm.model == "exaone3.5"  # kept
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        rc = cli.main(["-c", str(path), "backend", "anthropic"])
+        out = capsys.readouterr().out
+        assert rc == 1 and "ANTHROPIC_API_KEY" in out
+        cfg = _coerce(json.loads(path.read_text(encoding="utf-8")))
+        assert cfg.llm.backend == "anthropic" and cfg.llm.model.startswith("claude")
+        assert cli.main(["-c", str(path), "backend", "echo"]) == 0
+        assert _coerce(json.loads(path.read_text(encoding="utf-8"))).llm.backend == "echo"

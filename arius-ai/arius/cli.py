@@ -81,6 +81,8 @@ def _startup_login(arius: Arius, *, interactive: bool = True) -> bool:
                 return True
             except AuthenticationError:
                 print("암호가 틀렸습니다.")
+        print(f"게스트로 시작합니다. 나중에 '/login {user.username}' 으로 로그인할 수 있습니다.\n"
+              "암호 없이 자동으로 오너로 시작하려면: python main.py passwd --clear  (Windows: run.bat passwd --clear)")
         return False
     return False
 
@@ -226,9 +228,22 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"{cfg.assistant_name} 준비 완료. 백엔드: {arius.backend.name}, 임베딩: {arius.embedder.name}, "
           f"에이전트: {cfg.agent.autonomy}, 모드: {get_mode(arius.current_mode()).label}. 현재 사용자: {arius.current_user_label}.")
     if not logged_in:
-        owners = [u.username for u in arius.permissions.users() if u.role is Role.OWNER]
-        hint = f"/login {owners[0]}" if owners else "config.json 의 users 에 role=owner 계정을 추가"
+        owners = [u for u in arius.permissions.users() if u.role is Role.OWNER]
+        if owners:
+            hint = f"/login {owners[0].username}"
+            if owners[0].requires_passphrase:
+                hint += "  (암호를 없애려면 run.bat passwd --clear)"
+        else:
+            hint = "config.json 의 users 에 role=owner 계정을 추가 (python main.py init)"
         print(f"※ 게스트로 시작했습니다 — 오너 권한으로 쓰려면 {hint}")
+    if arius.backend.name == "echo":
+        degraded = getattr(arius.backend, "_degraded_reason", None)
+        if degraded:
+            print(f"※ '{cfg.llm.backend}' 백엔드를 쓸 수 없어 오프라인 응답 모드입니다 — {degraded}")
+            print("   해결 후 확인: run.bat backend " + ("ollama" if cfg.llm.backend == "ollama" else "anthropic"))
+        else:
+            print("※ 오프라인 응답 모드입니다 — 진짜 대화를 하려면 run.bat backend ollama exaone3.5 (로컬 모델) "
+                  "또는 run.bat backend anthropic (API 키) 로 백엔드를 연결하십시오.")
     print(HELP_COMMANDS + "\n")
 
     def event(msg: str) -> None:
@@ -557,6 +572,116 @@ def _handle_login(arius: Arius, line: str) -> None:
     print(f"환영합니다, {arius.current_user_label}.")
 
 
+def _load_config_file(explicit: str | None) -> tuple[Path | None, AriusConfig | None]:
+    from arius.config import find_config, load_config
+
+    path = find_config(explicit)
+    if path is None:
+        print("config.json 을 찾지 못했습니다. 먼저 `python main.py init` 을 실행하십시오.")
+        return None, None
+    return path, load_config(str(path))
+
+
+def _write_config_file(path: Path, config: AriusConfig) -> None:
+    path.write_text(json.dumps(config_to_dict(config), ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def cmd_passwd(args: argparse.Namespace) -> int:
+    """Set or clear an account's passphrase in config.json (default: the first owner)."""
+    path, cfg = _load_config_file(args.config)
+    if cfg is None:
+        return 1
+    username = args.user
+    if not username:
+        owners = [u for u in cfg.users if u.role.lower() == "owner"]
+        if not owners:
+            print("오너 계정이 없습니다. config.json 의 users 에 role=owner 계정을 추가하십시오.")
+            return 1
+        username = owners[0].username
+    uc = cfg.user(username)
+    if uc is None:
+        print(f"등록되지 않은 사용자입니다: {username}")
+        return 1
+    if args.clear:
+        uc.passphrase_hash = ""
+        _write_config_file(path, cfg)
+        print(f"'{username}' 의 암호를 없앴습니다. 이제 시작할 때 자동으로 {username} 으로 로그인합니다.")
+        return 0
+    try:
+        p1 = getpass.getpass(f"'{username}' 새 암호: ")
+        p2 = getpass.getpass("암호 확인: ")
+    except (EOFError, KeyboardInterrupt):
+        print("\n취소했습니다.")
+        return 1
+    if not p1 or p1 != p2:
+        print("암호가 비어 있거나 일치하지 않습니다.")
+        return 1
+    uc.passphrase_hash = hash_passphrase(p1)
+    _write_config_file(path, cfg)
+    print(f"'{username}' 의 암호를 설정했습니다. 시작할 때 암호를 묻습니다.")
+    return 0
+
+
+def _probe_ollama(base_url: str, model: str) -> str | None:
+    """None when the Ollama server is up and the model is pulled, else a Korean reason."""
+    from arius import ollama
+
+    return ollama.probe(ollama.http_json(base_url), model, base_url)
+
+
+def cmd_backend(args: argparse.Namespace) -> int:
+    """Switch the LLM backend in config.json and check that it can actually serve."""
+    from arius.ollama import DEFAULT_CHAT_MODEL
+
+    path, cfg = _load_config_file(args.config)
+    if cfg is None:
+        return 1
+    name = args.name.lower()
+    cfg.llm.backend = name
+    if args.url:
+        cfg.llm.base_url = args.url
+    if name == "ollama":
+        if args.model:
+            cfg.llm.model = args.model
+        elif not cfg.llm.model or cfg.llm.model.lower().startswith("claude"):
+            cfg.llm.model = DEFAULT_CHAT_MODEL
+    elif name == "anthropic":
+        if args.model:
+            cfg.llm.model = args.model
+        elif not cfg.llm.model or not cfg.llm.model.lower().startswith("claude"):
+            cfg.llm.model = "claude-sonnet-5"
+    _write_config_file(path, cfg)
+    print(f"백엔드를 '{name}' 로 설정했습니다 (모델: {cfg.llm.model if name != 'echo' else '없음'}). 저장: {path}")
+
+    if name == "ollama":
+        why = _probe_ollama(cfg.llm.base_url, cfg.llm.model)
+        if why is None:
+            print(f"✅ Ollama 연결 확인 — 모델 '{cfg.llm.model}' 준비됨. 이제 run.bat 으로 시작하면 진짜 대화가 됩니다.")
+            return 0
+        print(f"⚠️ {why}")
+        print("순서: 1) https://ollama.com/download 에서 설치  2) 터미널에서 "
+              f"`ollama pull {cfg.llm.model}`  3) 다시 `run.bat backend ollama {cfg.llm.model}` 로 확인")
+        print("(한국어가 강한 모델: exaone3.5, qwen2.5, llama3.1 — 8GB RAM 이면 exaone3.5:2.4b 또는 qwen2.5:3b 권장)")
+        return 1
+    if name == "anthropic":
+        ok = True
+        try:
+            import anthropic  # type: ignore  # noqa: F401
+        except ImportError:
+            ok = False
+            print("⚠️ `anthropic` 패키지가 없습니다: .venv 에서 `pip install anthropic` (Windows: .venv\\Scripts\\pip install anthropic)")
+        if not cfg.llm.api_key:
+            ok = False
+            print(f"⚠️ 환경 변수 {cfg.llm.api_key_env} 가 비어 있습니다. API 키를 발급받아(https://console.anthropic.com) "
+                  f"PowerShell 에서 `setx {cfg.llm.api_key_env} \"sk-ant-...\"` 로 저장한 뒤 새 창에서 다시 실행하십시오. "
+                  "(키 값은 config 나 대화에 넣지 마십시오)")
+        if ok:
+            print("✅ Anthropic 준비됨. 이제 run.bat 으로 시작하면 진짜 대화가 됩니다.")
+        return 0 if ok else 1
+    print("오프라인 응답 모드입니다 (규칙 기반). 언제든 `run.bat backend ollama` 또는 `run.bat backend anthropic` 으로 바꿀 수 있습니다.")
+    return 0
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     path = Path(args.config or "config.json")
     if path.exists() and not args.force:
@@ -569,7 +694,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     owner_display = input(f"오너 표시 이름 [{owner_username}]: ").strip() or owner_username
 
     passphrase_hash = ""
-    if _yes_no("오너 계정에 암호를 설정할까요?", default=True):
+    if _yes_no("오너 계정에 암호를 설정할까요? (설정하면 시작할 때마다 암호를 묻습니다. 나중에 `passwd --clear` 로 제거 가능)", default=False):
         while True:
             p1 = getpass.getpass("암호: ")
             p2 = getpass.getpass("암호 확인: ")
@@ -672,6 +797,17 @@ def build_parser() -> argparse.ArgumentParser:
     init_p = sub.add_parser("init", help="config 생성 및 오너 계정 설정")
     init_p.add_argument("--force", action="store_true", help="기존 config 덮어쓰기")
     init_p.set_defaults(func=cmd_init)
+
+    pw_p = sub.add_parser("passwd", help="계정 암호 설정/제거: passwd [--clear] [--user 아이디]")
+    pw_p.add_argument("--clear", action="store_true", help="암호를 없애 시작할 때 자동 로그인")
+    pw_p.add_argument("--user", help="대상 아이디 (기본: 첫 오너)")
+    pw_p.set_defaults(func=cmd_passwd)
+
+    be_p = sub.add_parser("backend", help="추론 백엔드 전환: backend ollama [모델] | anthropic | echo")
+    be_p.add_argument("name", choices=["echo", "anthropic", "ollama"])
+    be_p.add_argument("model", nargs="?", help="모델 이름 (ollama: exaone3.5, qwen2.5 …; anthropic: claude-sonnet-5)")
+    be_p.add_argument("--url", help="Ollama 서버 주소 (기본 http://localhost:11434)")
+    be_p.set_defaults(func=cmd_backend)
 
     return parser
 
