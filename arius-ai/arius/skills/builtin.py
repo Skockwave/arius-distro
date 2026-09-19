@@ -24,7 +24,7 @@ from arius import permissions as perm
 from arius import web
 from arius.memory import Project
 from arius.modes import MODES, get_mode, parse_mode
-from arius.permissions import Role, User, hash_passphrase
+from arius.permissions import Role, User
 from arius.privacy import looks_secret, refuse_secret_message
 from arius.skills import Skill, SkillContext
 

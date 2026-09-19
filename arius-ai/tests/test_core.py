@@ -85,6 +85,7 @@ def test_user_admin_add_and_setrole():
     assert added.source == "skill:user-admin"
     assert arius.permissions.get("newbie").role is Role.OPERATOR
     changed = arius.handle("권한 변경 newbie admin")
+    assert changed.source == "skill:user-admin"
     assert arius.permissions.get("newbie").role is Role.ADMIN
 
 

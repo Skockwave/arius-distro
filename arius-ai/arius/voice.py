@@ -21,6 +21,9 @@ import platform
 import re
 import shutil
 import subprocess
+import threading as _threading
+import time as _time
+from collections.abc import Callable as _Callable
 
 from arius.privacy import looks_secret, redact
 
@@ -221,10 +224,6 @@ class SpeechToText:
 
 
 # --- Wake-word conversation ---------------------------------------------------------
-
-import threading as _threading
-import time as _time
-from collections.abc import Callable as _Callable
 
 _STRIP = re.compile(r"[\s\.\,\!\?\~\-\_\'\"\(\)\[\]…·]+")
 

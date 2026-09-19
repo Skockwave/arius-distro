@@ -22,7 +22,7 @@ from arius.permissions import AuthenticationError, hash_passphrase
 from arius.voice import SpeechToText, TextToSpeech, VoiceConversation
 from arius.agent.heartbeat import Heartbeat
 from arius.agent.loop import AUTONOMY_LEVELS
-from arius.discord import DiscordBot, DiscordError
+from arius.discord import DiscordBot
 from arius.discord_chat import DiscordChat
 from arius.memory import Memory
 from arius.modes import get_mode, parse_mode

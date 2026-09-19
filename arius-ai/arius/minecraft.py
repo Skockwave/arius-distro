@@ -16,8 +16,15 @@ host uses one, put the real port in ``minecraft.port``.
 from __future__ import annotations
 
 import json
+import ntpath as _ntpath
+import os as _os
+import posixpath as _posixpath
+import re as _re
 import socket
 import struct
+import subprocess as _sp
+import sys as _sys
+import time as _time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -313,14 +320,6 @@ def load_distribution(path: str | Path) -> DistributionInfo | None:
 
 
 # --- Local Bukkit/Spigot/Paper server management ----------------------------------
-
-import ntpath as _ntpath
-import os as _os
-import posixpath as _posixpath
-import re as _re
-import subprocess as _sp
-import sys as _sys
-import time as _time
 
 _SERVER_JAR_HINTS = ("paper", "spigot", "bukkit", "craftbukkit", "purpur", "folia", "server.jar", "forge", "fabric", "minecraft_server")
 

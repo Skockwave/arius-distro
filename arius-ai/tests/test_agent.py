@@ -14,7 +14,7 @@ from arius.discord import DiscordClient
 from arius.llm.base import LLMBackend
 from arius.memory import Memory
 from arius.minecraft import ServerStatus
-from arius.permissions import PermissionManager, Role, Session, User
+from arius.permissions import PermissionManager
 
 
 class ScriptedBackend(LLMBackend):
@@ -137,19 +137,21 @@ def test_file_tools_are_read_only_and_confined():
         tools = build_registry()
         assert "server.properties" in tools["list_dir"].handler(ctx, {"path": tmp})
         assert "motd=x" in tools["read_file"].handler(ctx, {"path": str(Path(tmp, "server.properties"))})
+        outside = str(Path(tmp).parent / "outside-the-server-folder.txt")  # any path not under an allowed root
         try:
-            tools["read_file"].handler(ctx, {"path": "/etc/hostname"})
+            tools["read_file"].handler(ctx, {"path": outside})
             assert False
         except Refused as exc:
             assert "허용 폴더 밖" in str(exc)
 
 
-def test_heartbeat_rules_offline_notify_and_restart_policy():
+def test_heartbeat_rules_offline_notify_and_restart_policy(tmp_path):
     calls = []
     cfg, mem, session, ctx = make_ctx(online=False, discord_calls=calls)
     started = []
     ctx.server_starter = lambda d, c: started.append(d) or "서버 시작 명령을 실행했습니다: x"
-    cfg.minecraft.server_dir = "/tmp"
+    server_dir = str(tmp_path)  # platform-neutral: not "/tmp", which Windows renders as "\\tmp"
+    cfg.minecraft.server_dir = server_dir
     mem.add_policy("디스크 85% 넘으면 알려줘")
     mem.add_policy("서버 꺼지면 다시 켜고 디스코드에 공지해")
     from arius.llm.echo_backend import EchoBackend
@@ -160,7 +162,7 @@ def test_heartbeat_rules_offline_notify_and_restart_policy():
     report = hb.run_once()
     assert "규칙 기반 조치" in report
     assert any("디스크" in n for n in notes)
-    assert started == ["/tmp"] and calls  # restarted + announced on Discord
+    assert started == [server_dir] and calls  # restarted + announced on Discord
     assert mem.agent_log()[-1]["kind"] == "heartbeat"
 
 
