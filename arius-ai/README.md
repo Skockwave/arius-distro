@@ -43,7 +43,7 @@ irm https://raw.githubusercontent.com/Skockwave/arius-distro/main/arius-ai/boots
 curl -fsSL https://raw.githubusercontent.com/Skockwave/arius-distro/main/arius-ai/bootstrap.sh | bash
 ```
 
-이 한 줄이 **Python 확인(Windows는 없으면 winget으로 자동 설치) → 코드 다운로드 → `~/ARIUS`(Windows: `%USERPROFILE%\ARIUS`)에 복사 → 설치 → 오너 계정 설정 → 바탕화면 바로가기(Windows)** 까지 전부 처리합니다. 다시 실행해도 안전합니다(설정과 가상환경 보존).
+이 한 줄이 **Python 확인(Windows는 없으면 winget으로 자동 설치) → 코드 다운로드 → Windows는 `바탕 화면\ARIUS`, macOS/Linux는 `~/ARIUS`에 복사 → 설치 → 오너 계정 설정 → 바탕 화면 바로가기(Windows)** 까지 전부 처리합니다. 설치 위치를 바꾸려면 앞에 `$env:ARIUS_DIR="D:\ARIUS"; ` 를 붙이십시오. 다시 실행해도 안전합니다(설정과 가상환경 보존).
 아직 `main`에 합쳐지기 전이라면 URL의 `main`을 `claude/high-performance-ai-system-ibqiwl`로 바꾸십시오. 스크립트는 `main`에 코드가 없으면 그 브랜치를 자동으로 시도합니다.
 
 ### 직접 하려면

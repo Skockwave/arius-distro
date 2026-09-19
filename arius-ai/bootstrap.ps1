@@ -3,7 +3,7 @@
 #   PowerShell에 붙여넣기:
 #   irm https://raw.githubusercontent.com/Skockwave/arius-distro/main/arius-ai/bootstrap.ps1 | iex
 #
-# 하는 일: Python 확인(없으면 winget으로 설치) -> 코드 ZIP 다운로드 -> %USERPROFILE%\ARIUS 에 복사
+# 하는 일: Python 확인(없으면 winget으로 설치) -> 코드 ZIP 다운로드 -> 바탕 화면\ARIUS 에 복사
 #          -> install.bat 실행 -> 바탕화면 "ARIUS" 바로가기 생성.
 # 다시 실행해도 안전합니다: config.json 과 .venv 는 보존됩니다.
 # 환경변수: ARIUS_DIR (설치 폴더), ARIUS_BRANCH (브랜치 강제), ARIUS_ARCHIVE_URL (ZIP 주소 강제)
@@ -12,7 +12,8 @@ $ErrorActionPreference = "Stop"
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
 $Repo     = "Skockwave/arius-distro"
-$Dest     = if ($env:ARIUS_DIR) { $env:ARIUS_DIR } else { Join-Path $env:USERPROFILE "ARIUS" }
+# 기본 설치 위치: 바탕 화면\ARIUS (눈에 잘 띄도록). 바꾸려면 $env:ARIUS_DIR 설정.
+$Dest     = if ($env:ARIUS_DIR) { $env:ARIUS_DIR } else { Join-Path ([Environment]::GetFolderPath("Desktop")) "ARIUS" }
 $Branches = @()
 if ($env:ARIUS_BRANCH) { $Branches += $env:ARIUS_BRANCH }
 $Branches += @("main", "claude/high-performance-ai-system-ibqiwl")
