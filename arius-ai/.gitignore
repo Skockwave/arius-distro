@@ -1,0 +1,27 @@
+# Local runtime config & data (may contain passphrase hashes / private notes)
+config.json
+config.yaml
+config.yml
+*.db
+.arius/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Test / tooling
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store

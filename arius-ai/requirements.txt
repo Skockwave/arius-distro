@@ -1,0 +1,8 @@
+# ARIUS core runs on the Python standard library alone — nothing required here.
+# The following are OPTIONAL, enabling extra backends/features:
+
+# Real conversational reasoning via Anthropic Claude (llm.backend = "anthropic")
+anthropic>=0.40.0
+
+# Only needed if you prefer a YAML config instead of JSON
+# pyyaml>=6.0

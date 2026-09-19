@@ -1,0 +1,44 @@
+"""Persona / system-prompt construction.
+
+Turns the assistant's configuration, the active user, and any recalled facts
+into the system prompt that steers the language model — the "JARVIS voice."
+"""
+
+from __future__ import annotations
+
+from arius.config import AriusConfig
+from arius.memory import Fact
+from arius.permissions import Session
+
+
+def build_system_prompt(
+    config: AriusConfig,
+    session: Session,
+    recalled: list[Fact] | None = None,
+) -> str:
+    p = config.persona
+    user = session.user
+    address = f"{user.display_name}{p.honorific}" if p.honorific else user.display_name
+
+    lines = [
+        f"당신은 '{config.assistant_name}'입니다. 사용자의 개인 인공지능 비서로서, "
+        "영화 속 인공지능 비서처럼 침착하고 유능하며 신뢰감 있게 응대합니다.",
+        f"성격/말투: {p.style_notes}",
+        f"현재 사용자: {address} (아이디: {user.username}, 권한 등급: {user.role.label}).",
+        f"사용자를 부를 때는 '{address}'라고 호칭하십시오." if p.honorific else "",
+        "원칙:",
+        "- 항상 정중하고 간결하게, 핵심부터 답하십시오.",
+        "- 확실하지 않은 것은 추측하지 말고 모른다고 말하십시오.",
+        "- 사용자의 권한 등급을 넘어서는 작업은 시스템이 차단합니다. 그런 요청에는 "
+        "정중히 제한을 설명하십시오.",
+        "- 위험하거나 되돌리기 어려운 작업은 실행 전에 확인을 구하십시오.",
+        f"- 특별한 지시가 없으면 {config.language} 언어로 답하십시오.",
+    ]
+
+    if recalled:
+        lines.append("")
+        lines.append("사용자에 대해 기억하고 있는 정보(참고용):")
+        for f in recalled:
+            lines.append(f"- {f.key}: {f.value}")
+
+    return "\n".join(line for line in lines if line != "")

@@ -1,0 +1,32 @@
+{
+  "assistant_name": "ARIUS",
+  "language": "ko",
+  "data_dir": "~/.arius",
+  "default_user": "guest",
+  "llm": {
+    "backend": "echo",
+    "model": "claude-sonnet-5",
+    "api_key_env": "ANTHROPIC_API_KEY",
+    "max_tokens": 1024,
+    "temperature": 0.4
+  },
+  "persona": {
+    "honorific": "님",
+    "tone": "formal",
+    "style_notes": "차분하고 정중하며 유능하다. 군더더기 없이 핵심을 말하고, 필요하면 먼저 제안한다."
+  },
+  "users": [
+    {
+      "username": "owner",
+      "role": "owner",
+      "display_name": "오너",
+      "passphrase_hash": ""
+    },
+    {
+      "username": "friend",
+      "role": "user",
+      "display_name": "친구",
+      "passphrase_hash": ""
+    }
+  ]
+}
