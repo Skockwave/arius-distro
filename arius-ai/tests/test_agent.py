@@ -2,6 +2,7 @@
 
 import json
 import tempfile
+import threading
 from pathlib import Path
 
 from arius.agent.heartbeat import Heartbeat
@@ -30,12 +31,12 @@ class ScriptedBackend(LLMBackend):
         return self.replies.pop(0) if self.replies else json.dumps({"final": "끝"})
 
 
-def make_ctx(role="admin", online=True, discord_calls=None, tmp=None):
+def make_ctx(role="admin", online=True, discord_calls=None, tmp=None, db_path=":memory:"):
     cfg = AriusConfig(users=[UserConfig("u", role)])
     cfg.minecraft.name = "메테노서버"
     if tmp:
         cfg.minecraft.server_dir = str(tmp)
-    mem = Memory(":memory:")
+    mem = Memory(db_path)
     session = PermissionManager.from_config(cfg).authenticate("u")
     discord_calls = discord_calls if discord_calls is not None else []
 
@@ -161,6 +162,36 @@ def test_heartbeat_rules_offline_notify_and_restart_policy():
     assert any("디스크" in n for n in notes)
     assert started == ["/tmp"] and calls  # restarted + announced on Discord
     assert mem.agent_log()[-1]["kind"] == "heartbeat"
+
+
+def test_heartbeat_background_thread_uses_memory_built_on_main_thread(tmp_path):
+    """`python main.py agent`: Memory is opened on the main thread, the tick runs on another.
+
+    Regression for "SQLite objects created in a thread can only be used in that same thread".
+    """
+    cfg, mem, session, ctx = make_ctx(online=True, db_path=tmp_path / "arius.db")
+    from arius.llm.echo_backend import EchoBackend
+    events = []
+    ticked = threading.Event()
+
+    def on_event(msg):
+        events.append(msg)
+        if msg.startswith("점검"):
+            ticked.set()
+
+    hb = Heartbeat(lambda: AgentLoop(EchoBackend(), build_registry(), ctx), ctx, on_event=on_event)
+    hb.start()
+    try:
+        assert ticked.wait(10), "first heartbeat tick never reported"
+    finally:
+        hb.stop()
+        hb._thread.join(10)
+    assert not any(e.startswith("점검 오류") for e in events), events
+    assert any(e.startswith("점검: 이상 없음") for e in events), events
+    assert mem.agent_log()[-1]["kind"] == "heartbeat"  # written by the other thread, read here
+    # /agent run from the REPL uses the same Heartbeat (and Memory) on the main thread
+    assert "이상 없음" in hb.run_once()
+    mem.close()
 
 
 def test_heartbeat_detects_server_transition_once():
