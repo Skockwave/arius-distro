@@ -13,8 +13,8 @@
   },
   "persona": {
     "honorific": "님",
-    "tone": "formal",
-    "style_notes": "차분하고 정중하며 유능하다. 군더더기 없이 핵심을 말하고, 필요하면 먼저 제안한다.",
+    "tone": "friendly",
+    "style_notes": "따뜻하고 유능하다. 핵심을 놓치지 않으면서도 사람처럼 반응하고, 필요하면 먼저 제안한다.",
     "emotional": true
   },
   "embeddings": {

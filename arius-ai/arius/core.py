@@ -182,7 +182,7 @@ class Arius:
         if session.can("memory.read"):
             recalled = self.memory.recall_facts(username, text, limit=4)
 
-        system = build_system_prompt(self.config, session, recalled, channel=channel)
+        system = build_system_prompt(self.config, session, recalled, channel=channel, mood=self.current_mood())
         history = self.memory.recent_messages(username, limit=10)
         messages = [Message(role=m["role"], content=m["content"]) for m in history if m["role"] in ("user", "assistant")]
         messages.append(Message(role="user", content=text))
@@ -199,6 +199,19 @@ class Arius:
         self.memory.add_message(username, "user", text)
         self.memory.add_message(username, "assistant", reply_text)
         return Reply(reply_text, f"llm:{self.backend.name}")
+
+    # -- mood ------------------------------------------------------------------
+    MOOD_KEY = "mood"
+
+    def current_mood(self) -> str:
+        """The assistant's feeling, set by events (heartbeat transitions) or the user."""
+        for f in self.memory.list_facts("__arius__"):
+            if f.key == self.MOOD_KEY:
+                return f.value
+        return ""
+
+    def set_mood(self, mood: str) -> None:
+        self.memory.learn_fact("__arius__", self.MOOD_KEY, mood)
 
     # -- helpers -------------------------------------------------------------
     def _refusal(self, capability: str, session: Session | None = None) -> str:

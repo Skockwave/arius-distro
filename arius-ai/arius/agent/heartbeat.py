@@ -127,6 +127,7 @@ class Heartbeat:
         if prev is None or prev == now:
             return ""
         name = self.ctx.config.minecraft.name
+        self.ctx.memory.learn_fact(SYSTEM_USER, "mood", "안도와 기쁨 — 서버가 다시 살아났다" if online else "걱정 — 서버가 꺼져 있다")
         return f"🟢 {name} 가 온라인이 되었습니다." if online else f"🔴 {name} 가 오프라인이 되었습니다."
 
     def _discord(self, title: str, body: str) -> None:
