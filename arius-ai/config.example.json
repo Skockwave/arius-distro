@@ -15,6 +15,18 @@
     "tone": "formal",
     "style_notes": "차분하고 정중하며 유능하다. 군더더기 없이 핵심을 말하고, 필요하면 먼저 제안한다."
   },
+  "embeddings": {
+    "backend": "hashing",
+    "model": "paraphrase-multilingual-MiniLM-L12-v2",
+    "dim": 512
+  },
+  "voice": {
+    "enabled": false,
+    "listen": false,
+    "language": "ko-KR",
+    "rate": 180,
+    "voice_name": ""
+  },
   "users": [
     {
       "username": "owner",

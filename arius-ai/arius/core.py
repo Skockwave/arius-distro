@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from arius.config import AriusConfig, load_config
+from arius.embeddings import build_embedder
 from arius.llm import LLMBackend, Message, build_backend
 from arius.memory import Memory
 from arius.permissions import (
@@ -48,7 +49,14 @@ class Arius:
     ) -> None:
         self.config = config or AriusConfig()
         self.permissions = PermissionManager.from_config(self.config)
-        self.memory = memory or Memory(self._default_db_path())
+        self.embedder = build_embedder(self.config)
+        if memory is None:
+            memory = Memory(self._default_db_path(), embedder=self.embedder)
+        elif memory.embedder is None:
+            memory.embedder = self.embedder
+        self.memory = memory
+        # Embed pre-existing data once (e.g. a DB created before vectors existed).
+        self.memory.ensure_index()
         self.backend = backend or build_backend(self.config)
         self.registry = registry or SkillRegistry(default_skills())
         self.session: Session = self.permissions.guest_session()

@@ -46,6 +46,26 @@ class PersonaConfig:
 
 
 @dataclass
+class EmbeddingsConfig:
+    """How text is turned into vectors for similarity-based recall."""
+
+    backend: str = "hashing"  # "hashing" (offline, no deps) | "sentence-transformers"
+    model: str = "paraphrase-multilingual-MiniLM-L12-v2"
+    dim: int = 512  # only used by the hashing backend
+
+
+@dataclass
+class VoiceConfig:
+    """Spoken input/output. Everything here is optional and degrades gracefully."""
+
+    enabled: bool = False  # speak replies aloud
+    listen: bool = False  # take input from the microphone
+    language: str = "ko-KR"
+    rate: int = 180  # words per minute (pyttsx3 / say)
+    voice_name: str = ""  # substring of a preferred OS voice name, e.g. "Yuna"
+
+
+@dataclass
 class UserConfig:
     """A person the assistant recognizes."""
 
@@ -66,6 +86,8 @@ class AriusConfig:
     data_dir: str = "~/.arius"
     llm: LLMConfig = field(default_factory=LLMConfig)
     persona: PersonaConfig = field(default_factory=PersonaConfig)
+    embeddings: EmbeddingsConfig = field(default_factory=EmbeddingsConfig)
+    voice: VoiceConfig = field(default_factory=VoiceConfig)
     users: list[UserConfig] = field(default_factory=list)
     # Username assumed when nobody has logged in. GUEST role unless overridden.
     default_user: str = "guest"
@@ -89,12 +111,17 @@ def _coerce(data: dict[str, Any]) -> AriusConfig:
     persona = PersonaConfig(
         **{k: v for k, v in (data.get("persona") or {}).items() if k in PersonaConfig.__dataclass_fields__}
     )
+    embeddings = EmbeddingsConfig(
+        **{k: v for k, v in (data.get("embeddings") or {}).items() if k in EmbeddingsConfig.__dataclass_fields__}
+    )
+    voice = VoiceConfig(**{k: v for k, v in (data.get("voice") or {}).items() if k in VoiceConfig.__dataclass_fields__})
     users = [
         UserConfig(**{k: v for k, v in u.items() if k in UserConfig.__dataclass_fields__})
         for u in (data.get("users") or [])
     ]
-    top = {k: v for k, v in data.items() if k in AriusConfig.__dataclass_fields__ and k not in {"llm", "persona", "users"}}
-    return AriusConfig(llm=llm, persona=persona, users=users, **top)
+    nested = {"llm", "persona", "users", "embeddings", "voice"}
+    top = {k: v for k, v in data.items() if k in AriusConfig.__dataclass_fields__ and k not in nested}
+    return AriusConfig(llm=llm, persona=persona, embeddings=embeddings, voice=voice, users=users, **top)
 
 
 def _read_raw(path: Path) -> dict[str, Any]:
@@ -150,6 +177,18 @@ def config_to_dict(config: AriusConfig) -> dict[str, Any]:
             "honorific": config.persona.honorific,
             "tone": config.persona.tone,
             "style_notes": config.persona.style_notes,
+        },
+        "embeddings": {
+            "backend": config.embeddings.backend,
+            "model": config.embeddings.model,
+            "dim": config.embeddings.dim,
+        },
+        "voice": {
+            "enabled": config.voice.enabled,
+            "listen": config.voice.listen,
+            "language": config.voice.language,
+            "rate": config.voice.rate,
+            "voice_name": config.voice.voice_name,
         },
         "users": [
             {

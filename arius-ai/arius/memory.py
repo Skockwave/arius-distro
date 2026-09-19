@@ -2,14 +2,19 @@
 
 Backed by SQLite (standard library) so it survives restarts with zero setup.
 
-Three stores:
+Stores:
   * conversation log   - rolling dialogue history (for context windows)
   * facts              - things the user explicitly teaches the assistant
   * projects           - long-lived initiatives (e.g. a build/"suit" project)
+  * knowledge          - web pages the assistant has read (see web.py)
+  * vectors            - embeddings of facts and knowledge passages, so recall
+                         can rank by *meaning* (cosine similarity), not just
+                         exact keywords. See embeddings.py.
 
-"Learning" here is practical: durable recall + keyword retrieval that gets
-fed back into the model's context. It is not model fine-tuning (impractical
-on a personal machine); see the README for how real training would attach.
+Recall is hybrid: semantic similarity when an embedder is attached, boosted
+by keyword hits; pure keyword matching otherwise. "Learning" here is durable
+recall that gets fed back into the model's context — not model fine-tuning
+(impractical on a personal machine; see the README).
 """
 
 from __future__ import annotations
@@ -19,6 +24,8 @@ import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
+
+from arius.embeddings import Embedder, chunk_text, cosine, from_blob, to_blob
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages (
@@ -55,7 +62,22 @@ CREATE TABLE IF NOT EXISTS knowledge (
     ts       REAL NOT NULL,
     UNIQUE(username, url)
 );
+CREATE TABLE IF NOT EXISTS vectors (
+    kind     TEXT NOT NULL,          -- 'fact' | 'knowledge'
+    username TEXT NOT NULL,
+    ref      TEXT NOT NULL,          -- fact key, or knowledge url
+    idx      INTEGER NOT NULL DEFAULT 0,
+    text     TEXT NOT NULL,          -- the passage that was embedded
+    model    TEXT NOT NULL,          -- embedder name; mismatched rows are ignored
+    vec      BLOB NOT NULL,
+    PRIMARY KEY (kind, username, ref, idx, model)
+);
 """
+
+# Cosine below this is treated as "unrelated" for the hashing embedder.
+DEFAULT_MIN_SCORE = 0.12
+_FACT_KW_BOOST = 0.15
+_KNOWLEDGE_KW_BOOST = 0.05
 
 
 @dataclass
@@ -64,6 +86,7 @@ class Fact:
     value: str
     tags: str = ""
     ts: float = 0.0
+    score: float = 0.0
 
 
 @dataclass
@@ -82,15 +105,18 @@ class Knowledge:
     title: str
     content: str
     ts: float = 0.0
+    best_chunk: str = ""  # the passage that matched best (semantic recall)
+    score: float = 0.0
 
     def snippet(self, limit: int = 200) -> str:
-        body = " ".join(self.content.split())
+        body = " ".join((self.best_chunk or self.content).split())
         return body if len(body) <= limit else body[: limit - 1] + "…"
 
 
 class Memory:
-    def __init__(self, db_path: str | Path = ":memory:") -> None:
+    def __init__(self, db_path: str | Path = ":memory:", embedder: Embedder | None = None) -> None:
         self.db_path = str(db_path)
+        self.embedder = embedder
         if self.db_path != ":memory:":
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.db_path)
@@ -130,19 +156,21 @@ class Memory:
 
     # -- facts (explicit learning) -----------------------------------------
     def learn_fact(self, username: str, key: str, value: str, tags: str = "") -> None:
+        key, value = key.strip(), value.strip()
         self._conn.execute(
             """INSERT INTO facts (username, key, value, tags, ts)
                VALUES (?, ?, ?, ?, ?)
                ON CONFLICT(username, key) DO UPDATE SET value=excluded.value,
                    tags=excluded.tags, ts=excluded.ts""",
-            (username, key.strip(), value.strip(), tags, time.time()),
+            (username, key, value, tags, time.time()),
         )
+        self._index_fact(username, key, value)
         self._conn.commit()
 
     def forget_fact(self, username: str, key: str) -> bool:
-        cur = self._conn.execute(
-            "DELETE FROM facts WHERE username = ? AND key = ?", (username, key.strip())
-        )
+        key = key.strip()
+        cur = self._conn.execute("DELETE FROM facts WHERE username = ? AND key = ?", (username, key))
+        self._conn.execute("DELETE FROM vectors WHERE kind='fact' AND username = ? AND ref = ?", (username, key))
         self._conn.commit()
         return cur.rowcount > 0
 
@@ -153,21 +181,25 @@ class Memory:
         ).fetchall()
         return [Fact(**dict(r)) for r in rows]
 
-    def recall_facts(self, username: str, query: str, limit: int = 5) -> list[Fact]:
-        """Keyword recall over the user's stored facts."""
+    def recall_facts(
+        self, username: str, query: str, limit: int = 5, min_score: float = DEFAULT_MIN_SCORE
+    ) -> list[Fact]:
+        """Hybrid recall: semantic similarity (if available) boosted by keyword hits."""
+        facts = self.list_facts(username)
+        if not facts:
+            return []
         terms = [t for t in _tokenize(query) if len(t) >= 2]
-        rows = self._conn.execute(
-            "SELECT key, value, tags, ts FROM facts WHERE username = ?", (username,)
-        ).fetchall()
-        scored: list[tuple[int, Fact]] = []
-        for r in rows:
-            fact = Fact(**dict(r))
+        semantic = self._semantic_scores("fact", username, query)
+        ranked: list[Fact] = []
+        for fact in facts:
             haystack = f"{fact.key} {fact.value} {fact.tags}".lower()
-            score = sum(haystack.count(t) for t in terms)
-            if score:
-                scored.append((score, fact))
-        scored.sort(key=lambda x: (-x[0], x[1].key))
-        return [f for _, f in scored[:limit]]
+            kw = sum(haystack.count(t) for t in terms)
+            score = semantic.get(fact.key, (0.0, ""))[0] + _FACT_KW_BOOST * min(kw, 3)
+            if kw > 0 or score >= min_score:
+                fact.score = round(score, 4)
+                ranked.append(fact)
+        ranked.sort(key=lambda f: (-f.score, f.key))
+        return ranked[:limit]
 
     # -- projects -----------------------------------------------------------
     def upsert_project(self, project: Project) -> None:
@@ -218,6 +250,7 @@ class Memory:
                    content=excluded.content, ts=excluded.ts""",
             (username, url, title, content, time.time()),
         )
+        self._index_knowledge(username, url, title, content)
         self._conn.commit()
 
     def list_knowledge(self, username: str) -> list[Knowledge]:
@@ -227,26 +260,119 @@ class Memory:
         ).fetchall()
         return [Knowledge(**dict(r)) for r in rows]
 
-    def search_knowledge(self, username: str, query: str, limit: int = 5) -> list[Knowledge]:
-        """Keyword search over learned web content."""
+    def search_knowledge(
+        self, username: str, query: str, limit: int = 5, min_score: float = DEFAULT_MIN_SCORE
+    ) -> list[Knowledge]:
+        """Hybrid search over learned web content; returns the best-matching passage."""
+        docs = self.list_knowledge(username)
+        if not docs:
+            return []
         terms = [t for t in _tokenize(query) if len(t) >= 2]
+        semantic = self._semantic_scores("knowledge", username, query)
+        ranked: list[Knowledge] = []
+        for doc in docs:
+            haystack = f"{doc.title}\n{doc.content}".lower()
+            kw = sum(haystack.count(t) for t in terms)
+            cos, passage = semantic.get(doc.url, (0.0, ""))
+            score = cos + _KNOWLEDGE_KW_BOOST * min(kw, 5)
+            if kw > 0 or score >= min_score:
+                doc.score = round(score, 4)
+                doc.best_chunk = passage or _keyword_passage(doc.content, terms)
+                ranked.append(doc)
+        ranked.sort(key=lambda d: (-d.score, -d.ts))
+        return ranked[:limit]
+
+    # -- vector index -------------------------------------------------------
+    def _index_fact(self, username: str, key: str, value: str) -> None:
+        if self.embedder is None:
+            return
+        self._conn.execute(
+            "DELETE FROM vectors WHERE kind='fact' AND username = ? AND ref = ?", (username, key)
+        )
+        vec = self.embedder.embed(f"{key}: {value}")
+        self._conn.execute(
+            "INSERT INTO vectors (kind, username, ref, idx, text, model, vec) VALUES ('fact', ?, ?, 0, ?, ?, ?)",
+            (username, key, f"{key}: {value}", self.embedder.name, to_blob(vec)),
+        )
+
+    def _index_knowledge(self, username: str, url: str, title: str, content: str) -> None:
+        if self.embedder is None:
+            return
+        self._conn.execute(
+            "DELETE FROM vectors WHERE kind='knowledge' AND username = ? AND ref = ?", (username, url)
+        )
+        chunks = chunk_text(content)
+        if not chunks:
+            return
+        vecs = self.embedder.embed_many([f"{title}\n{c}" for c in chunks])
+        self._conn.executemany(
+            "INSERT INTO vectors (kind, username, ref, idx, text, model, vec) VALUES ('knowledge', ?, ?, ?, ?, ?, ?)",
+            [
+                (username, url, i, chunk, self.embedder.name, to_blob(vec))
+                for i, (chunk, vec) in enumerate(zip(chunks, vecs))
+            ],
+        )
+
+    def _semantic_scores(self, kind: str, username: str, query: str) -> dict[str, tuple[float, str]]:
+        """Best cosine per ref (and the passage that achieved it)."""
+        if self.embedder is None or not query.strip():
+            return {}
+        qv = self.embedder.embed(query)
         rows = self._conn.execute(
-            "SELECT url, title, content, ts FROM knowledge WHERE username = ?", (username,)
+            "SELECT ref, text, vec FROM vectors WHERE kind = ? AND username = ? AND model = ?",
+            (kind, username, self.embedder.name),
         ).fetchall()
-        scored: list[tuple[int, Knowledge]] = []
+        best: dict[str, tuple[float, str]] = {}
         for r in rows:
-            k = Knowledge(**dict(r))
-            haystack = f"{k.title}\n{k.content}".lower()
-            score = sum(haystack.count(t) for t in terms)
-            if score:
-                scored.append((score, k))
-        scored.sort(key=lambda x: (-x[0], -x[1].ts))
-        return [k for _, k in scored[:limit]]
+            score = cosine(qv, from_blob(r["vec"]))
+            if score > best.get(r["ref"], (-1.0, ""))[0]:
+                best[r["ref"]] = (score, r["text"])
+        return best
+
+    def index_size(self) -> int:
+        if self.embedder is None:
+            return 0
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM vectors WHERE model = ?", (self.embedder.name,)
+        ).fetchone()
+        return int(row["n"])
+
+    def reindex(self) -> int:
+        """Rebuild all vectors with the current embedder. Returns rows embedded."""
+        if self.embedder is None:
+            return 0
+        self._conn.execute("DELETE FROM vectors WHERE model = ?", (self.embedder.name,))
+        for r in self._conn.execute("SELECT username, key, value FROM facts").fetchall():
+            self._index_fact(r["username"], r["key"], r["value"])
+        for r in self._conn.execute("SELECT username, url, title, content FROM knowledge").fetchall():
+            self._index_knowledge(r["username"], r["url"], r["title"], r["content"])
+        self._conn.commit()
+        return self.index_size()
+
+    def ensure_index(self) -> int:
+        """Embed existing data if this embedder has never indexed it (e.g. after upgrade)."""
+        if self.embedder is None or self.index_size() > 0:
+            return 0
+        has_data = self._conn.execute(
+            "SELECT (SELECT COUNT(*) FROM facts) + (SELECT COUNT(*) FROM knowledge) AS n"
+        ).fetchone()["n"]
+        return self.reindex() if has_data else 0
+
+
+def _keyword_passage(content: str, terms: list[str], width: int = 200) -> str:
+    """Fallback snippet: the region around the first keyword hit."""
+    low = content.lower()
+    for t in terms:
+        pos = low.find(t)
+        if pos != -1:
+            start = max(0, pos - width // 3)
+            return content[start : start + width]
+    return content[:width]
 
 
 def _tokenize(text: str) -> list[str]:
     out: list[str] = []
-    token = []
+    token: list[str] = []
     for ch in text.lower():
         if ch.isalnum() or ("가" <= ch <= "힣"):  # keep Hangul syllables
             token.append(ch)
