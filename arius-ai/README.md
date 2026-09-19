@@ -314,10 +314,12 @@ python main.py listen        # 또는 REPL에서 /wake
 | macOS / Linux | `bash setup-voice.sh` (macOS는 Homebrew로 PortAudio까지 자동) |
 | 아무 OS | `python main.py setup voice` — 설치 후 진단까지, `python main.py setup check` — 진단만 |
 
-설치기는 **SpeechRecognition(인식) + PyAudio(마이크) + pyttsx3(음성 출력)** 를 가상환경에 넣고, 각 항목을 ✅/❌ 로 보여 주며 **마이크 장치 목록**까지 확인합니다. `install.bat` / `install.sh` 도 기본으로 이 설치를 포함합니다(엔터만 치면 됨).
+설치기는 **SpeechRecognition(인식) + sounddevice(마이크) + pyttsx3(음성 출력)** 를 가상환경에 넣고, 각 항목을 ✅/❌ 로 보여 주며 **마이크 장치 목록**까지 확인합니다. `install.bat` / `install.sh` 도 기본으로 이 설치를 포함합니다(엔터만 치면 됨).
+
+마이크는 **PyAudio 없이** 동작합니다. `sounddevice` 는 PortAudio 를 내장한 미리 빌드된 패키지라 Windows/macOS 어떤 Python 버전에서도 컴파일 없이 설치됩니다(PyAudio 는 Python 버전에 맞는 휠이 없으면 빌드 실패가 잦아서 선택 사항으로 내렸습니다).
 
 ❌ 가 나오면 이렇게 하십시오:
-- **PyAudio 빌드 실패** — Windows: Python 3.10~3.13 이면 보통 그냥 설치됩니다(실패 시 `pip install pipwin && pipwin install pyaudio`). macOS: `brew install portaudio` 후 재시도. Ubuntu: `sudo apt install portaudio19-dev python3-dev` 후 재시도.
+- **마이크 입력 라이브러리** — Linux 만 시스템 라이브러리가 필요: `sudo apt install libportaudio2`. Windows/macOS 는 `setup-voice` 재실행.
 - **음성 출력 엔진 없음** — Windows/macOS 는 OS 내장 음성을 쓰므로 거의 없음. Linux: `sudo apt install espeak-ng`.
 - **마이크 목록 0개** — 이어폰/헤드셋을 꽂고, Windows 설정 → 개인정보 → 마이크 → "데스크톱 앱이 마이크에 액세스" 허용.
 
@@ -466,6 +468,7 @@ arius-ai/
 │   ├── embeddings.py        # 임베딩(해싱 / sentence-transformers / ollama) + 문단 분할
 │   ├── ollama.py            # 로컬 Ollama HTTP 클라이언트 (표준 라이브러리)
 │   ├── voice.py             # 음성 출력(TTS)·입력(STT) + 웨이크워드 대화
+│   ├── mic.py               # PyAudio 없는 마이크 캡처 (sounddevice + 음성 구간 감지)
 │   ├── setup.py             # 선택 기능 설치·진단 (setup voice / check)
 │   ├── autostart.py         # 로그인 자동 시작 (시작프로그램 / LaunchAgent / autostart)
 │   ├── minecraft.py         # 서버 핑, RCON, 로컬 서버 프로세스/로그/시작

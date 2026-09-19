@@ -143,12 +143,17 @@ class TextToSpeech:
 
 
 class SpeechToText:
-    def __init__(self, language: str = "ko-KR", timeout: float = 6.0, phrase_limit: float = 15.0) -> None:
+    """Google Web Speech via SpeechRecognition. Microphone backends, in order:
+    sounddevice (prebuilt wheels, no compiler) then PyAudio (sr.Microphone)."""
+
+    def __init__(self, language: str = "ko-KR", timeout: float = 6.0, phrase_limit: float = 15.0, microphone=None) -> None:
         self.language = language
         self.timeout = timeout
         self.phrase_limit = phrase_limit
         self._sr = None
         self._recognizer = None
+        self._mic = microphone  # injected sounddevice-style Microphone (tests) or None
+        self.mic_backend: str | None = None
         self.reason: str | None = None
         try:
             import speech_recognition as sr  # type: ignore
@@ -156,28 +161,53 @@ class SpeechToText:
             self._sr = sr
             self._recognizer = sr.Recognizer()
         except ImportError:
-            self.reason = (
-                "음성 인식을 쓰려면 `pip install SpeechRecognition pyaudio` 가 필요합니다."
-            )
+            self.reason = "음성 인식을 쓰려면 `pip install SpeechRecognition sounddevice` 가 필요합니다 (setup-voice 로 설치)."
+            return
+        if self._mic is not None:
+            self.mic_backend = "sounddevice"
+            return
+        from arius.mic import Microphone, sounddevice_available
+
+        ok, why = sounddevice_available()
+        if ok:
+            self._mic = Microphone()
+            self.mic_backend = "sounddevice"
+            return
+        try:
+            import pyaudio  # type: ignore  # noqa: F401
+
+            self.mic_backend = "pyaudio"
+        except ImportError:
+            self.reason = f"마이크 라이브러리가 없습니다. {why} (setup-voice 로 설치)"
 
     @property
     def available(self) -> bool:
-        return self._recognizer is not None
+        return self._recognizer is not None and self.mic_backend is not None
 
     def listen(self) -> str | None:
         """Capture one utterance. None = nothing heard / unavailable, '' = unintelligible."""
         if not self.available:
             return None
         sr = self._sr
-        try:
-            with sr.Microphone() as source:
-                self._recognizer.adjust_for_ambient_noise(source, duration=0.4)
-                audio = self._recognizer.listen(source, timeout=self.timeout, phrase_time_limit=self.phrase_limit)
-        except (OSError, AttributeError) as exc:
-            self.reason = f"마이크를 열 수 없습니다: {exc} (PyAudio 설치 및 마이크 권한을 확인하십시오)"
-            return None
-        except sr.WaitTimeoutError:
-            return None
+        if self.mic_backend == "sounddevice":
+            try:
+                phrase = self._mic.listen(timeout=self.timeout, phrase_limit=self.phrase_limit)
+            except Exception as exc:
+                self.reason = f"마이크를 열 수 없습니다: {exc} (마이크 연결과 OS 마이크 권한을 확인하십시오)"
+                return None
+            if phrase is None:
+                return None
+            audio = sr.AudioData(phrase.pcm, phrase.sample_rate, phrase.sample_width)
+        else:
+            try:
+                with sr.Microphone() as source:
+                    self._recognizer.adjust_for_ambient_noise(source, duration=0.4)
+                    audio = self._recognizer.listen(source, timeout=self.timeout, phrase_time_limit=self.phrase_limit)
+            except (OSError, AttributeError) as exc:
+                self.reason = f"마이크를 열 수 없습니다: {exc} (마이크 연결과 OS 마이크 권한을 확인하십시오)"
+                return None
+            except sr.WaitTimeoutError:
+                return None
         try:
             return self._recognizer.recognize_google(audio, language=self.language)
         except sr.UnknownValueError:

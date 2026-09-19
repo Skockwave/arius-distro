@@ -2,7 +2,7 @@
   "assistant_name": "ARIUS",
   "language": "ko",
   "data_dir": "~/.arius",
-  "default_user": "guest",
+  "default_user": "owner",
   "llm": {
     "backend": "echo",
     "model": "claude-sonnet-5",

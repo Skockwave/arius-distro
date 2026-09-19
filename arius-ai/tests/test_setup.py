@@ -21,22 +21,24 @@ def test_pip_install_uses_given_interpreter():
     assert seen[0][:3] == ["/venv/bin/python", "-m", "pip"] and "pyttsx3" in seen[0]
 
 
-def test_install_voice_keeps_going_after_pyaudio_failure():
+def test_install_voice_installs_sounddevice_not_pyaudio():
     calls = []
+    rep = install_voice(runner=lambda args: calls.append(args) or (0, "ok"))
+    assert len(calls) == 1  # one pip call: SpeechRecognition + pyttsx3 + sounddevice
+    assert "sounddevice" in calls[0] and "pyaudio" not in calls[0]
+    assert rep.steps[0].ok and isinstance(rep, SetupReport)
 
-    def runner(args):
-        calls.append(args)
-        return (1, "portaudio.h missing") if "pyaudio" in args else (0, "ok")
 
-    rep = install_voice(runner=runner)
-    assert len(calls) == 2  # pure-python packages first, then pyaudio separately
-    assert rep.steps[0].ok and not rep.steps[1].ok
-    assert isinstance(rep, SetupReport) and "❌" in rep.render()
+def test_install_voice_reports_pip_failure_without_raising():
+    rep = install_voice(runner=lambda args: (1, "ReadTimeoutError: connection timed out"))
+    assert not rep.steps[0].ok and "네트워크" in rep.steps[0].detail
+    assert "❌" in rep.render()
 
 
 def test_check_voice_never_raises_and_reports_every_step():
     rep = check_voice()
     names = [s.name for s in rep.steps]
-    assert any("SpeechRecognition" in n for n in names) and any("PyAudio" in n for n in names)
+    assert any("SpeechRecognition" in n for n in names)
+    assert any("마이크 입력 라이브러리" in n for n in names)  # sounddevice (preferred) or PyAudio
     assert all(isinstance(s, StepResult) for s in rep.steps)
     assert rep.render()

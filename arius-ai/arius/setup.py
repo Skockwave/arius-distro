@@ -17,7 +17,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-VOICE_PACKAGES = ["SpeechRecognition", "pyttsx3", "pyaudio"]
+VOICE_PACKAGES = ["SpeechRecognition", "pyttsx3", "sounddevice"]  # pyaudio is optional
 
 
 @dataclass
@@ -53,15 +53,9 @@ def _default_runner(args: list[str]) -> tuple[int, str]:
 
 def portaudio_hint() -> str:
     sysname = platform.system()
-    if sysname == "Darwin":
-        return "터미널에서 `brew install portaudio` 를 먼저 실행한 뒤 다시 시도하십시오."
     if sysname == "Linux":
-        return ("PortAudio 개발 패키지가 필요합니다: Ubuntu/Debian `sudo apt install portaudio19-dev python3-dev`, "
-                "Fedora `sudo dnf install portaudio-devel`, 그다음 다시 시도하십시오.")
-    if sysname == "Windows":
-        return ("이 Python 버전용 PyAudio 휠이 없을 수 있습니다. Python 3.10~3.13 은 `pip install pyaudio` 로 보통 설치됩니다. "
-                "그래도 실패하면 `pip install pipwin && pipwin install pyaudio` 를 시도하십시오.")
-    return "PortAudio 라이브러리를 설치한 뒤 다시 시도하십시오."
+        return "Linux 는 `sudo apt install libportaudio2` (Fedora: `portaudio`) 를 설치한 뒤 다시 시도하십시오."
+    return "PyAudio 는 선택 사항입니다 — 마이크는 `sounddevice`(미리 빌드된 패키지)로 동작합니다."
 
 
 def pip_install(packages: list[str], runner: Runner | None = None, python: str | None = None) -> StepResult:
@@ -90,16 +84,37 @@ def check_import(module: str, label: str | None = None) -> StepResult:
 
 
 def check_microphones() -> StepResult:
-    try:
-        import speech_recognition as sr  # type: ignore
+    from arius.mic import list_input_devices, sounddevice_available
 
-        names = sr.Microphone.list_microphone_names()
-    except Exception as exc:
-        return StepResult("마이크 목록", False, f"{exc.__class__.__name__}: {str(exc)[:120]} (PyAudio 필요)")
+    names: list[str] = []
+    ok, _ = sounddevice_available()
+    if ok:
+        names = list_input_devices()
+    else:
+        try:
+            import speech_recognition as sr  # type: ignore
+
+            names = sr.Microphone.list_microphone_names()
+        except Exception as exc:
+            return StepResult("마이크 목록", False, f"{exc.__class__.__name__}: {str(exc)[:120]}")
     if not names:
         return StepResult("마이크 목록", False, "마이크 장치를 찾지 못했습니다. 이어폰/헤드셋 연결과 OS 마이크 권한을 확인하십시오.")
     shown = ", ".join(n for n in names[:5] if n)
     return StepResult("마이크 목록", True, f"{len(names)}개 — {shown}")
+
+
+def check_mic_library() -> StepResult:
+    from arius.mic import sounddevice_available
+
+    ok, why = sounddevice_available()
+    if ok:
+        return StepResult("마이크 입력 라이브러리 (sounddevice)", True)
+    pa = check_import("pyaudio", "마이크 입력 라이브러리 (PyAudio)")
+    if pa.ok:
+        return pa
+    hint = portaudio_hint()
+    detail = why if "libportaudio2" in why else f"{why} {hint}".strip()
+    return StepResult("마이크 입력 라이브러리 (sounddevice)", False, detail)
 
 
 def check_tts() -> StepResult:
@@ -112,21 +127,18 @@ def check_tts() -> StepResult:
 def check_voice() -> SetupReport:
     rep = SetupReport()
     rep.steps.append(check_import("speech_recognition", "음성 인식 라이브러리 (SpeechRecognition)"))
-    pa = check_import("pyaudio", "마이크 입력 라이브러리 (PyAudio)")
-    if not pa.ok:
-        pa.detail = (pa.detail + " — " if pa.detail else "") + portaudio_hint()
-    rep.steps.append(pa)
+    mic = check_mic_library()
+    rep.steps.append(mic)
     rep.steps.append(check_import("pyttsx3", "음성 합성 라이브러리 (pyttsx3)"))
     rep.steps.append(check_tts())
-    if pa.ok:
+    if mic.ok:
         rep.steps.append(check_microphones())
     return rep
 
 
 def install_voice(runner: Runner | None = None, python: str | None = None) -> SetupReport:
     rep = SetupReport()
-    # pure-Python packages first so a PyAudio build failure never blocks them
-    rep.steps.append(pip_install(["SpeechRecognition", "pyttsx3"], runner, python))
-    rep.steps.append(pip_install(["pyaudio"], runner, python))
+    # sounddevice carries its own PortAudio (prebuilt wheels) — no compiler, any Python version.
+    rep.steps.append(pip_install(["SpeechRecognition", "pyttsx3", "sounddevice"], runner, python))
     rep.steps.extend(check_voice().steps)
     return rep

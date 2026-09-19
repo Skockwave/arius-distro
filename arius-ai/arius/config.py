@@ -168,8 +168,8 @@ class AriusConfig:
     minecraft: MinecraftConfig = field(default_factory=MinecraftConfig)
     discord: DiscordConfig = field(default_factory=DiscordConfig)
     users: list[UserConfig] = field(default_factory=list)
-    # Username assumed when nobody has logged in. GUEST role unless overridden.
-    default_user: str = "guest"
+    # Account to log in at startup. Empty = the first owner; a name = that account.
+    default_user: str = ""
 
     @property
     def resolved_data_dir(self) -> Path:

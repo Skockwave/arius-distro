@@ -44,6 +44,40 @@ HELP_COMMANDS = (
 )
 
 
+def _startup_login(arius: Arius, *, interactive: bool = True) -> bool:
+    """Log the owner in at startup — this is a personal machine, not a kiosk.
+
+    Order: config.default_user (when it names a real account) → the first OWNER.
+    An account without a passphrase logs in silently; one with a passphrase is
+    asked for it (interactive) or skipped (daemon). Returns True when logged in."""
+    cfg = arius.config
+    candidates: list[User] = []
+    preferred = arius.permissions.get(cfg.default_user) if cfg.default_user else None
+    if preferred is not None:
+        candidates.append(preferred)
+    candidates += [u for u in arius.permissions.users() if u.role is Role.OWNER and u not in candidates]
+    for user in candidates:
+        if not user.requires_passphrase:
+            arius.login(user.username)
+            return True
+        if not interactive:
+            continue
+        for _ in range(3):
+            try:
+                pw = getpass.getpass(f"{user.display_name} 암호 (Enter = 게스트로 시작): ")
+            except (EOFError, KeyboardInterrupt):
+                pw = ""
+            if not pw:
+                break
+            try:
+                arius.login(user.username, pw)
+                return True
+            except AuthenticationError:
+                print("암호가 틀렸습니다.")
+        return False
+    return False
+
+
 def _agent_session(arius: Arius) -> Session:
     """Who the background agent acts as: the first owner, else a synthetic admin."""
     for u in arius.permissions.users():
@@ -180,17 +214,14 @@ def cmd_run(args: argparse.Namespace) -> int:
     cfg = arius.config
     voice = _Voice(cfg)
 
-    # Auto-login the single owner if there is exactly one user and it needs no
-    # passphrase — convenient for a personal machine.
-    if not args.no_autologin and len(cfg.users) == 1 and not cfg.users[0].passphrase_hash:
-        try:
-            arius.login(cfg.users[0].username)
-        except AuthenticationError:
-            pass
-
     print(BANNER)
+    logged_in = False if args.no_autologin else _startup_login(arius)
     print(f"{cfg.assistant_name} 준비 완료. 백엔드: {arius.backend.name}, 임베딩: {arius.embedder.name}, "
           f"에이전트: {cfg.agent.autonomy}. 현재 사용자: {arius.current_user_label}.")
+    if not logged_in:
+        owners = [u.username for u in arius.permissions.users() if u.role is Role.OWNER]
+        hint = f"/login {owners[0]}" if owners else "config.json 의 users 에 role=owner 계정을 추가"
+        print(f"※ 게스트로 시작했습니다 — 오너 권한으로 쓰려면 {hint}")
     print(HELP_COMMANDS + "\n")
 
     def event(msg: str) -> None:
@@ -367,11 +398,7 @@ def cmd_agent(args: argparse.Namespace) -> int:
 
     arius = Arius.from_path(args.config)
     cfg = arius.config
-    if len(cfg.users) == 1 and not cfg.users[0].passphrase_hash:
-        try:
-            arius.login(cfg.users[0].username)
-        except AuthenticationError:
-            pass
+    _startup_login(arius, interactive=False)
 
     def event(msg: str) -> None:
         line = f"[{_t.strftime('%Y-%m-%d %H:%M:%S')}] {msg}"
@@ -416,11 +443,7 @@ def cmd_listen(args: argparse.Namespace) -> int:
     """Voice conversation mode: call the assistant by name, talk, repeat."""
     arius = Arius.from_path(args.config)
     cfg = arius.config
-    if len(cfg.users) == 1 and not cfg.users[0].passphrase_hash:
-        try:
-            arius.login(cfg.users[0].username)
-        except AuthenticationError:
-            pass
+    _startup_login(arius)
     voice = _Voice(cfg)
 
     def event(msg: str) -> None:
