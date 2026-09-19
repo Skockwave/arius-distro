@@ -26,7 +26,26 @@
 
 핵심 기능은 **파이썬 표준 라이브러리만으로** 동작합니다. 필요한 건 **Python 3.10 이상** 하나뿐입니다.
 
-### 1) 코드 받기
+### 가장 쉬운 방법 — 한 줄 자동 설치
+
+**Windows** — 시작 메뉴에서 *PowerShell* 을 열고 아래 한 줄을 붙여넣기 → Enter:
+
+```powershell
+irm https://raw.githubusercontent.com/Skockwave/arius-distro/main/arius-ai/bootstrap.ps1 | iex
+```
+
+**macOS / Linux** — 터미널에서:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Skockwave/arius-distro/main/arius-ai/bootstrap.sh | bash
+```
+
+이 한 줄이 **Python 확인(Windows는 없으면 winget으로 자동 설치) → 코드 다운로드 → `~/ARIUS`(Windows: `%USERPROFILE%\ARIUS`)에 복사 → 설치 → 오너 계정 설정 → 바탕화면 바로가기(Windows)** 까지 전부 처리합니다. 다시 실행해도 안전합니다(설정과 가상환경 보존).
+아직 `main`에 합쳐지기 전이라면 URL의 `main`을 `claude/high-performance-ai-system-ibqiwl`로 바꾸십시오. 스크립트는 `main`에 코드가 없으면 그 브랜치를 자동으로 시도합니다.
+
+### 직접 하려면
+
+#### 1) 코드 받기
 
 - **ZIP**: GitHub 저장소 페이지에서 브랜치 선택 → 초록색 **Code** → **Download ZIP** → 압축 해제 → 그 안의 `arius-ai` 폴더를 씁니다.
 - **git**:
@@ -36,7 +55,7 @@
   ```
   (아직 `main`에 합쳐지기 전이라면 `git clone -b claude/high-performance-ai-system-ibqiwl …`)
 
-### 2) Windows — 더블클릭 두 번
+#### 2) Windows — 더블클릭 두 번
 
 1. Python이 없다면 https://www.python.org/downloads/ 에서 설치. 설치 화면 맨 아래 **"Add python.exe to PATH" 체크 필수**.
 2. `arius-ai` 폴더의 **`install.bat` 더블클릭** → Python 확인 → 가상환경(.venv) 생성 → 선택 기능 설치 여부 → 오너 계정·백엔드 설정(`init`).
@@ -44,14 +63,14 @@
 
 `run.bat`은 콘솔을 UTF-8로 맞춰 주므로 **한글이 깨지지 않습니다.** 음성으로 실행하려면 바로가기의 "대상" 끝에 ` run --voice` 를 붙이십시오.
 
-### 3) macOS / Linux — 명령 두 줄
+#### 3) macOS / Linux — 명령 두 줄
 
 ```bash
 bash install.sh     # Python 확인 → .venv → 선택 기능 → init
 ./run.sh            # 실행 (음성: ./run.sh run --voice)
 ```
 
-### 4) 직접 실행 (스크립트 없이)
+#### 4) 직접 실행 (스크립트 없이)
 
 ```bash
 cd arius-ai
@@ -59,7 +78,7 @@ python main.py init     # 설정과 오너 계정 생성 (대화형)
 python main.py          # 실행
 ```
 
-### 5) 선택 — 더 똑똑하게
+#### 5) 선택 — 더 똑똑하게
 
 | 원하는 것 | 할 일 |
 |---|---|
@@ -303,6 +322,7 @@ ARIUS › 기억하고 있는 내용입니다:
 ```
 arius-ai/
 ├── main.py                  # 진입점 (python main.py)
+├── bootstrap.ps1 / .sh      # 한 줄 자동 설치 (다운로드부터 바로가기까지)
 ├── install.bat / run.bat    # Windows 설치·실행 (더블클릭)
 ├── install.sh  / run.sh     # macOS·Linux 설치·실행
 ├── config.example.json      # 설정 예시
