@@ -13,6 +13,7 @@ dependencies = []
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.40.0"]
+chrome = ["playwright>=1.40.0"]
 yaml = ["pyyaml>=6.0"]
 dev = ["pytest>=7.0"]
 

@@ -46,6 +46,15 @@ CREATE TABLE IF NOT EXISTS projects (
     data     TEXT NOT NULL DEFAULT '{}',
     ts       REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS knowledge (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    url      TEXT NOT NULL,
+    title    TEXT NOT NULL,
+    content  TEXT NOT NULL,
+    ts       REAL NOT NULL,
+    UNIQUE(username, url)
+);
 """
 
 
@@ -65,6 +74,18 @@ class Project:
     notes: str = ""
     data: dict | None = None
     ts: float = 0.0
+
+
+@dataclass
+class Knowledge:
+    url: str
+    title: str
+    content: str
+    ts: float = 0.0
+
+    def snippet(self, limit: int = 200) -> str:
+        body = " ".join(self.content.split())
+        return body if len(body) <= limit else body[: limit - 1] + "…"
 
 
 class Memory:
@@ -187,6 +208,40 @@ class Memory:
             d["data"] = json.loads(d["data"] or "{}")
             out.append(Project(**d))
         return out
+
+    # -- knowledge (web learning) ------------------------------------------
+    def add_knowledge(self, username: str, url: str, title: str, content: str) -> None:
+        self._conn.execute(
+            """INSERT INTO knowledge (username, url, title, content, ts)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(username, url) DO UPDATE SET title=excluded.title,
+                   content=excluded.content, ts=excluded.ts""",
+            (username, url, title, content, time.time()),
+        )
+        self._conn.commit()
+
+    def list_knowledge(self, username: str) -> list[Knowledge]:
+        rows = self._conn.execute(
+            "SELECT url, title, content, ts FROM knowledge WHERE username = ? ORDER BY ts DESC",
+            (username,),
+        ).fetchall()
+        return [Knowledge(**dict(r)) for r in rows]
+
+    def search_knowledge(self, username: str, query: str, limit: int = 5) -> list[Knowledge]:
+        """Keyword search over learned web content."""
+        terms = [t for t in _tokenize(query) if len(t) >= 2]
+        rows = self._conn.execute(
+            "SELECT url, title, content, ts FROM knowledge WHERE username = ?", (username,)
+        ).fetchall()
+        scored: list[tuple[int, Knowledge]] = []
+        for r in rows:
+            k = Knowledge(**dict(r))
+            haystack = f"{k.title}\n{k.content}".lower()
+            score = sum(haystack.count(t) for t in terms)
+            if score:
+                scored.append((score, k))
+        scored.sort(key=lambda x: (-x[0], -x[1].ts))
+        return [k for _, k in scored[:limit]]
 
 
 def _tokenize(text: str) -> list[str]:

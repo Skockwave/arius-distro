@@ -68,6 +68,8 @@ CAP_SYSTEM_EXEC = "system.exec"  # dangerous: run shell commands
 CAP_PROJECT_READ = "project.read"
 CAP_PROJECT_MANAGE = "project.manage"
 CAP_USER_MANAGE = "user.manage"  # add/remove users, change roles
+CAP_WEB_LEARN = "web.learn"  # fetch web pages and store their content
+CAP_WEB_READ = "web.read"  # recall previously learned web knowledge
 
 
 ROLE_CAPABILITIES: dict[Role, set[str]] = {
@@ -80,6 +82,8 @@ ROLE_CAPABILITIES: dict[Role, set[str]] = {
         CAP_SYSTEM_EXEC,
         CAP_PROJECT_READ,
         CAP_PROJECT_MANAGE,
+        CAP_WEB_LEARN,
+        CAP_WEB_READ,
     },
     Role.OPERATOR: {
         CAP_CHAT,
@@ -88,12 +92,15 @@ ROLE_CAPABILITIES: dict[Role, set[str]] = {
         CAP_SYSTEM_INFO,
         CAP_PROJECT_READ,
         CAP_PROJECT_MANAGE,
+        CAP_WEB_LEARN,
+        CAP_WEB_READ,
     },
     Role.USER: {
         CAP_CHAT,
         CAP_MEMORY_READ,
         CAP_MEMORY_WRITE,
         CAP_PROJECT_READ,
+        CAP_WEB_READ,
     },
     Role.GUEST: {
         CAP_CHAT,

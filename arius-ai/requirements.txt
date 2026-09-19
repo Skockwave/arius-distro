@@ -4,5 +4,9 @@
 # Real conversational reasoning via Anthropic Claude (llm.backend = "anthropic")
 anthropic>=0.40.0
 
+# Chrome/Chromium rendering for web learning of JavaScript-heavy pages.
+# After installing, run: playwright install chromium
+# playwright>=1.40.0
+
 # Only needed if you prefer a YAML config instead of JSON
 # pyyaml>=6.0

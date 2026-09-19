@@ -15,6 +15,7 @@ import shlex
 import subprocess
 
 from arius import permissions as perm
+from arius import web
 from arius.memory import Project
 from arius.permissions import Role, User, hash_passphrase
 from arius.skills import Skill, SkillContext
@@ -236,6 +237,82 @@ class UserAdminSkill(Skill):
         return f"'{m.group('name')}'의 권한을 {role.label}(으)로 변경했습니다."
 
 
+class WebLearnSkill(Skill):
+    """Fetch a web page and store its readable text as learned knowledge.
+
+    A *bounded reader*, not a whole-internet crawler: it learns the page(s)
+    you point it at. Say '크롬' in the request to render with Chromium.
+    """
+
+    name = "web-learn"
+    description = "웹 페이지(URL)를 읽어 학습합니다. 예: '학습해: https://...' (권한: web.learn)"
+    capability = perm.CAP_WEB_LEARN
+    priority = 45
+
+    _pat = re.compile(r"^\s*(?:/weblearn|학습해|웹\s*학습|인터넷\s*학습|크롬으로?\s*학습해?)\s*[:：]?\s*(?P<body>.+)$", re.IGNORECASE)
+
+    def __init__(self, fetcher=None) -> None:
+        # fetcher(url, backend) -> WebPage; injectable for tests.
+        self._fetch = fetcher or (lambda url, backend: web.fetch(url, backend=backend))
+
+    def matches(self, text: str) -> bool:
+        return bool(self._pat.match(text))
+
+    def run(self, ctx: SkillContext, text: str) -> str:
+        m = self._pat.match(text)
+        assert m
+        body = m.group("body").strip()
+        url = web.extract_first_url(body)
+        if not url:
+            return (
+                "학습할 웹 주소(URL)를 함께 알려주십시오. 예: '학습해: https://example.com'.\n"
+                "(참고: '인터넷의 모든 것'을 한 번에 학습할 수는 없습니다. 원하는 페이지나 주제의 "
+                "링크를 주시면 그 내용을 읽어 기억하겠습니다.)"
+            )
+        backend = "chrome" if re.search(r"크롬|chrome", text, re.IGNORECASE) else "urllib"
+        try:
+            page = self._fetch(url, backend)
+        except Exception as exc:
+            return f"'{url}' 학습에 실패했습니다: {exc}"
+        if not page.text.strip():
+            return f"'{page.title}'({url})에서 읽을 수 있는 본문을 찾지 못했습니다."
+        ctx.memory.add_knowledge(ctx.session.user.username, page.url, page.title, page.text)
+        return (
+            f"학습 완료: '{page.title}'\n"
+            f"  • 출처: {url}\n"
+            f"  • 분량: 약 {page.length:,}자 (백엔드: {backend})\n"
+            f"  • 요약: {page.summary()}\n"
+            "이제 '웹에서 …찾아줘' 또는 '…배운 것 있어?'로 회상할 수 있습니다."
+        )
+
+
+class WebRecallSkill(Skill):
+    name = "web-recall"
+    description = "학습한 웹 내용을 검색/회상합니다. 예: '웹에서 포지 설치 찾아줘' (권한: web.read)"
+    capability = perm.CAP_WEB_READ
+    priority = 46
+
+    _pat = re.compile(r"(웹에서|웹\s*검색|인터넷에서|배운\s*것|학습한\s*내용|/websearch|/webrecall)", re.IGNORECASE)
+
+    def matches(self, text: str) -> bool:
+        return bool(self._pat.search(text))
+
+    def run(self, ctx: SkillContext, text: str) -> str:
+        username = ctx.session.user.username
+        query = self._pat.sub(" ", text)
+        query = re.sub(r"(찾아줘|알려줘|있어\??|뭐였|검색해줘|해줘)", " ", query).strip()
+        hits = ctx.memory.search_knowledge(username, query or text)
+        if not hits:
+            total = len(ctx.memory.list_knowledge(username))
+            if total == 0:
+                return "아직 웹에서 학습한 내용이 없습니다. '학습해: <URL>'로 먼저 학습시켜 주십시오."
+            return "학습한 내용 중 관련된 것을 찾지 못했습니다. 다른 키워드로 시도해 보십시오."
+        lines = ["학습한 웹 내용에서 찾았습니다:"]
+        for k in hits:
+            lines.append(f"  • {k.title} — {k.snippet()}\n    ({k.url})")
+        return "\n".join(lines)
+
+
 class ExecSkill(Skill):
     """Run a shell command. Highest-privilege skill; gated by system.exec."""
 
@@ -310,6 +387,8 @@ def default_skills() -> list[Skill]:
         LearnSkill(),
         RecallSkill(),
         ListFactsSkill(),
+        WebLearnSkill(),
+        WebRecallSkill(),
         ProjectSkill(),
         UserAdminSkill(),
         ExecSkill(),
