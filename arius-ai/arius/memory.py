@@ -15,12 +15,19 @@ Recall is hybrid: semantic similarity when an embedder is attached, boosted
 by keyword hits; pure keyword matching otherwise. "Learning" here is durable
 recall that gets fed back into the model's context — not model fine-tuning
 (impractical on a personal machine; see the README).
+
+A Memory may be used from any thread: the heartbeat runs on a background
+thread while the REPL (`/agent run`) can touch the same object from the main
+thread. The SQLite connection is opened with check_same_thread=False and every
+operation is serialised behind a reentrant lock.
 """
 
 from __future__ import annotations
 
+import functools
 import json
 import sqlite3
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -126,17 +133,32 @@ class Knowledge:
         return body if len(body) <= limit else body[: limit - 1] + "…"
 
 
+def _locked(method):
+    """Run `method` under the Memory's lock so one connection can be shared across threads."""
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
 class Memory:
     def __init__(self, db_path: str | Path = ":memory:", embedder: Embedder | None = None) -> None:
         self.db_path = str(db_path)
         self.embedder = embedder
         if self.db_path != ":memory:":
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.db_path)
+        self._lock = threading.RLock()
+        # check_same_thread=False: the heartbeat thread uses a Memory built on the
+        # main thread. Cross-thread use is made safe by _locked, not by SQLite.
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
 
+    @_locked
     def close(self) -> None:
         self._conn.close()
 
@@ -147,6 +169,7 @@ class Memory:
         self.close()
 
     # -- conversation log ---------------------------------------------------
+    @_locked
     def add_message(self, username: str, role: str, content: str) -> None:
         self._conn.execute(
             "INSERT INTO messages (username, role, content, ts) VALUES (?, ?, ?, ?)",
@@ -154,6 +177,7 @@ class Memory:
         )
         self._conn.commit()
 
+    @_locked
     def recent_messages(self, username: str | None = None, limit: int = 12) -> list[dict]:
         if username is None:
             rows = self._conn.execute(
@@ -168,6 +192,7 @@ class Memory:
         return [dict(r) for r in reversed(rows)]
 
     # -- facts (explicit learning) -----------------------------------------
+    @_locked
     def learn_fact(self, username: str, key: str, value: str, tags: str = "") -> None:
         key, value = key.strip(), value.strip()
         self._conn.execute(
@@ -180,6 +205,7 @@ class Memory:
         self._index_fact(username, key, value)
         self._conn.commit()
 
+    @_locked
     def forget_fact(self, username: str, key: str) -> bool:
         key = key.strip()
         cur = self._conn.execute("DELETE FROM facts WHERE username = ? AND key = ?", (username, key))
@@ -187,6 +213,7 @@ class Memory:
         self._conn.commit()
         return cur.rowcount > 0
 
+    @_locked
     def list_facts(self, username: str) -> list[Fact]:
         rows = self._conn.execute(
             "SELECT key, value, tags, ts FROM facts WHERE username = ? ORDER BY key",
@@ -194,6 +221,7 @@ class Memory:
         ).fetchall()
         return [Fact(**dict(r)) for r in rows]
 
+    @_locked
     def recall_facts(
         self, username: str, query: str, limit: int = 5, min_score: float = DEFAULT_MIN_SCORE
     ) -> list[Fact]:
@@ -215,6 +243,7 @@ class Memory:
         return ranked[:limit]
 
     # -- projects -----------------------------------------------------------
+    @_locked
     def upsert_project(self, project: Project) -> None:
         self._conn.execute(
             """INSERT INTO projects (name, owner, status, notes, data, ts)
@@ -232,6 +261,7 @@ class Memory:
         )
         self._conn.commit()
 
+    @_locked
     def get_project(self, name: str) -> Project | None:
         row = self._conn.execute(
             "SELECT name, owner, status, notes, data, ts FROM projects WHERE name = ?",
@@ -243,6 +273,7 @@ class Memory:
         d["data"] = json.loads(d["data"] or "{}")
         return Project(**d)
 
+    @_locked
     def list_projects(self) -> list[Project]:
         rows = self._conn.execute(
             "SELECT name, owner, status, notes, data, ts FROM projects ORDER BY ts DESC"
@@ -255,6 +286,7 @@ class Memory:
         return out
 
     # -- knowledge (web learning) ------------------------------------------
+    @_locked
     def add_knowledge(self, username: str, url: str, title: str, content: str) -> None:
         self._conn.execute(
             """INSERT INTO knowledge (username, url, title, content, ts)
@@ -266,6 +298,7 @@ class Memory:
         self._index_knowledge(username, url, title, content)
         self._conn.commit()
 
+    @_locked
     def list_knowledge(self, username: str) -> list[Knowledge]:
         rows = self._conn.execute(
             "SELECT url, title, content, ts FROM knowledge WHERE username = ? ORDER BY ts DESC",
@@ -273,6 +306,7 @@ class Memory:
         ).fetchall()
         return [Knowledge(**dict(r)) for r in rows]
 
+    @_locked
     def search_knowledge(
         self, username: str, query: str, limit: int = 5, min_score: float = DEFAULT_MIN_SCORE
     ) -> list[Knowledge]:
@@ -296,6 +330,7 @@ class Memory:
         return ranked[:limit]
 
     # -- agent: policies & log --------------------------------------------
+    @_locked
     def add_policy(self, text: str) -> int:
         cur = self._conn.execute(
             "INSERT INTO policies (text, enabled, ts) VALUES (?, 1, ?)", (text.strip(), time.time())
@@ -303,6 +338,7 @@ class Memory:
         self._conn.commit()
         return int(cur.lastrowid)
 
+    @_locked
     def list_policies(self, enabled_only: bool = False) -> list[dict]:
         sql = "SELECT id, text, enabled, ts FROM policies"
         if enabled_only:
@@ -310,16 +346,19 @@ class Memory:
         rows = self._conn.execute(sql + " ORDER BY id").fetchall()
         return [dict(r) for r in rows]
 
+    @_locked
     def set_policy_enabled(self, policy_id: int, enabled: bool) -> bool:
         cur = self._conn.execute("UPDATE policies SET enabled = ? WHERE id = ?", (1 if enabled else 0, policy_id))
         self._conn.commit()
         return cur.rowcount > 0
 
+    @_locked
     def remove_policy(self, policy_id: int) -> bool:
         cur = self._conn.execute("DELETE FROM policies WHERE id = ?", (policy_id,))
         self._conn.commit()
         return cur.rowcount > 0
 
+    @_locked
     def seed_policies(self, texts: list[str]) -> int:
         """Insert config policies that are not stored yet. Returns how many were added."""
         existing = {p["text"] for p in self.list_policies()}
@@ -331,6 +370,7 @@ class Memory:
                 added += 1
         return added
 
+    @_locked
     def log_agent(self, kind: str, summary: str, detail: str = "") -> None:
         self._conn.execute(
             "INSERT INTO agent_log (ts, kind, summary, detail) VALUES (?, ?, ?, ?)",
@@ -338,6 +378,7 @@ class Memory:
         )
         self._conn.commit()
 
+    @_locked
     def agent_log(self, limit: int = 20) -> list[dict]:
         rows = self._conn.execute(
             "SELECT ts, kind, summary, detail FROM agent_log ORDER BY id DESC LIMIT ?", (limit,)
@@ -391,6 +432,7 @@ class Memory:
                 best[r["ref"]] = (score, r["text"])
         return best
 
+    @_locked
     def index_size(self) -> int:
         if self.embedder is None:
             return 0
@@ -399,6 +441,7 @@ class Memory:
         ).fetchone()
         return int(row["n"])
 
+    @_locked
     def reindex(self) -> int:
         """Rebuild all vectors with the current embedder. Returns rows embedded."""
         if self.embedder is None:
@@ -411,6 +454,7 @@ class Memory:
         self._conn.commit()
         return self.index_size()
 
+    @_locked
     def ensure_index(self) -> int:
         """Embed existing data if this embedder has never indexed it (e.g. after upgrade)."""
         if self.embedder is None or self.index_size() > 0:

@@ -1,3 +1,5 @@
+import threading
+
 from arius.memory import Memory, Project
 
 
@@ -46,6 +48,59 @@ def test_projects():
         mem.upsert_project(Project(name="슈트", owner="owner", status="paused"))
         assert mem.get_project("슈트").status == "paused"
         assert len(mem.list_projects()) == 1
+
+
+# --- thread-safety -----------------------------------------------------------
+# The heartbeat runs on a background thread but its Memory is built on the main
+# thread (cli._make_heartbeat). Python's sqlite3 refuses that by default.
+
+
+def test_memory_created_on_main_thread_is_usable_from_another_thread(tmp_path):
+    mem = Memory(tmp_path / "arius.db")  # file-backed, opened here on the main thread
+    errors = []
+
+    def worker():
+        try:
+            mem.log_agent("heartbeat", "이상 없음")
+            mem.learn_fact("system", "mc.last_online", "1")
+            assert [f.value for f in mem.list_facts("system")] == ["1"]
+        except Exception as exc:
+            errors.append(exc)
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join(5)
+    assert not t.is_alive() and errors == []
+    # visible again from the main thread through the same connection
+    assert mem.agent_log()[-1]["kind"] == "heartbeat"
+    assert mem.list_facts("system")[0].value == "1"
+    mem.close()
+
+
+def test_memory_serialises_concurrent_writers():
+    """/agent run (main thread) and the heartbeat tick may hit one Memory at once."""
+    mem = Memory(":memory:")
+    errors = []
+    n_threads, n_rows = 4, 50
+
+    def worker(i):
+        try:
+            for j in range(n_rows):
+                mem.log_agent("action", f"t{i}-{j}")
+                mem.learn_fact("system", f"k{i}", str(j))
+                mem.list_policies()
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    assert errors == []
+    assert len(mem.agent_log(limit=10_000)) == n_threads * n_rows
+    assert len(mem.list_facts("system")) == n_threads
+    mem.close()
 
 
 # --- semantic (embedding-based) recall ---------------------------------------
