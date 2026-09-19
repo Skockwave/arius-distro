@@ -9,6 +9,9 @@ Two backends, both exposing the same tiny interface:
   * SentenceTransformerEmbedder (optional)
       Real neural sentence embeddings via `sentence-transformers`, using a
       multilingual model by default. Install: `pip install sentence-transformers`.
+  * OllamaEmbedder (optional, no Python deps)
+      Neural embeddings served by a local Ollama instance (`ollama pull bge-m3`).
+      Keeps the whole stack offline and on your own machine.
 
 Vectors are stored as float32 blobs in SQLite (see memory.py) so recall can
 rank by cosine similarity instead of exact keyword hits.
@@ -153,6 +156,45 @@ class SentenceTransformerEmbedder(Embedder):
         return [[float(x) for x in v] for v in vecs]
 
 
+class OllamaEmbedder(Embedder):
+    """Neural embeddings from a local Ollama server (no Python dependencies)."""
+
+    def __init__(self, model: str = "bge-m3", base_url: str = "http://localhost:11434", transport=None) -> None:
+        from arius.ollama import http_json, probe
+
+        self.model = model
+        self.base_url = base_url
+        self._transport = transport or http_json(base_url)
+        reason = probe(self._transport, model, base_url)
+        if reason:
+            raise RuntimeError(reason)
+        self.name = f"ollama:{model}"
+        self.dim = len(self.embed("차원 확인"))
+
+    def embed(self, text: str) -> list[float]:
+        return self.embed_many([text])[0]
+
+    def embed_many(self, texts: Iterable[str]) -> list[list[float]]:
+        items = list(texts)
+        if not items:
+            return []
+        try:
+            resp = self._transport("POST", "/api/embed", {"model": self.model, "input": items}, 120.0)
+            raw = resp["embeddings"]
+        except Exception:
+            # Older Ollama servers only have /api/embeddings, one prompt at a time.
+            raw = []
+            for t in items:
+                r = self._transport("POST", "/api/embeddings", {"model": self.model, "prompt": t}, 120.0)
+                raw.append(r["embedding"])
+        return [_unit(list(map(float, v))) for v in raw]
+
+
+def _unit(vec: list[float]) -> list[float]:
+    norm = math.sqrt(sum(v * v for v in vec))
+    return [v / norm for v in vec] if norm else vec
+
+
 def build_embedder(config) -> Embedder:
     """Construct the configured embedder, degrading to hashing if unavailable."""
     emb = config.embeddings
@@ -162,4 +204,19 @@ def build_embedder(config) -> Embedder:
             return SentenceTransformerEmbedder(emb.model)
         except RuntimeError:
             pass
+    if backend == "ollama":
+        from arius.ollama import DEFAULT_EMBED_MODEL
+
+        model = emb.model
+        # The sentence-transformers default is not an Ollama model; use the local default.
+        if not model or model == EmbeddingsDefaults.ST_MODEL:
+            model = DEFAULT_EMBED_MODEL
+        try:
+            return OllamaEmbedder(model, emb.base_url)
+        except RuntimeError:
+            pass
     return HashingEmbedder(dim=emb.dim)
+
+
+class EmbeddingsDefaults:
+    ST_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"

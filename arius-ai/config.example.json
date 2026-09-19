@@ -7,6 +7,7 @@
     "backend": "echo",
     "model": "claude-sonnet-5",
     "api_key_env": "ANTHROPIC_API_KEY",
+    "base_url": "http://localhost:11434",
     "max_tokens": 1024,
     "temperature": 0.4
   },
@@ -18,7 +19,8 @@
   "embeddings": {
     "backend": "hashing",
     "model": "paraphrase-multilingual-MiniLM-L12-v2",
-    "dim": 512
+    "dim": 512,
+    "base_url": "http://localhost:11434"
   },
   "voice": {
     "enabled": false,

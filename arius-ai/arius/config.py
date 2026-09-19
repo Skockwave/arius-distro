@@ -22,9 +22,10 @@ DEFAULT_CONFIG_NAMES = ("config.json", "config.yaml", "config.yml")
 class LLMConfig:
     """Which language model backend to talk to."""
 
-    backend: str = "echo"  # "echo" (offline) | "anthropic"
-    model: str = "claude-sonnet-5"
+    backend: str = "echo"  # "echo" (offline) | "anthropic" (cloud) | "ollama" (local model)
+    model: str = "claude-sonnet-5"  # for ollama: an Ollama model name, e.g. "llama3.1", "exaone3.5"
     api_key_env: str = "ANTHROPIC_API_KEY"
+    base_url: str = "http://localhost:11434"  # ollama server
     max_tokens: int = 1024
     temperature: float = 0.4
 
@@ -49,9 +50,10 @@ class PersonaConfig:
 class EmbeddingsConfig:
     """How text is turned into vectors for similarity-based recall."""
 
-    backend: str = "hashing"  # "hashing" (offline, no deps) | "sentence-transformers"
-    model: str = "paraphrase-multilingual-MiniLM-L12-v2"
+    backend: str = "hashing"  # "hashing" (offline, no deps) | "sentence-transformers" | "ollama"
+    model: str = "paraphrase-multilingual-MiniLM-L12-v2"  # for ollama: e.g. "bge-m3", "nomic-embed-text"
     dim: int = 512  # only used by the hashing backend
+    base_url: str = "http://localhost:11434"  # ollama server
 
 
 @dataclass
@@ -170,6 +172,7 @@ def config_to_dict(config: AriusConfig) -> dict[str, Any]:
             "backend": config.llm.backend,
             "model": config.llm.model,
             "api_key_env": config.llm.api_key_env,
+            "base_url": config.llm.base_url,
             "max_tokens": config.llm.max_tokens,
             "temperature": config.llm.temperature,
         },
@@ -182,6 +185,7 @@ def config_to_dict(config: AriusConfig) -> dict[str, Any]:
             "backend": config.embeddings.backend,
             "model": config.embeddings.model,
             "dim": config.embeddings.dim,
+            "base_url": config.embeddings.base_url,
         },
         "voice": {
             "enabled": config.voice.enabled,

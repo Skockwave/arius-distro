@@ -221,7 +221,20 @@ def cmd_init(args: argparse.Namespace) -> int:
                 break
             print("암호가 비어 있거나 일치하지 않습니다. 다시 입력하십시오.")
 
-    use_anthropic = _yes_no("실제 추론을 위해 Anthropic Claude 백엔드를 쓰시겠습니까?", default=False)
+    print("\n추론 백엔드를 고르십시오:")
+    print("  1) 오프라인      - 설치 없음, 규칙 기반 응답 (기본)")
+    print("  2) Anthropic     - 클라우드 Claude, API 키 필요, 최상급 추론")
+    print("  3) 로컬 모델     - Ollama, 무료·완전 오프라인, Ollama 설치 필요")
+    try:
+        choice = input("선택 [1]: ").strip() or "1"
+    except (EOFError, KeyboardInterrupt):
+        choice = "1"
+    ollama_model = ""
+    if choice == "3":
+        try:
+            ollama_model = input("Ollama 모델 이름 [llama3.1] (한국어 강함: exaone3.5, qwen2.5): ").strip() or "llama3.1"
+        except (EOFError, KeyboardInterrupt):
+            ollama_model = "llama3.1"
     use_voice = _yes_no("답변을 음성으로 읽어줄까요? (TTS)", default=False)
 
     config = AriusConfig(
@@ -236,14 +249,19 @@ def cmd_init(args: argparse.Namespace) -> int:
         ],
         default_user="guest",
     )
-    if use_anthropic:
+    if choice == "2":
         config.llm.backend = "anthropic"
+    elif choice == "3":
+        config.llm.backend = "ollama"
+        config.llm.model = ollama_model
     config.voice.enabled = use_voice
 
     path.write_text(json.dumps(config_to_dict(config), ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\n설정을 저장했습니다: {path}")
-    if use_anthropic:
+    if choice == "2":
         print("환경 변수 ANTHROPIC_API_KEY 에 API 키를 설정한 뒤 `pip install anthropic` 하십시오.")
+    elif choice == "3":
+        print(f"Ollama 설치(https://ollama.com) 후 터미널에서 `ollama pull {ollama_model}` 을 실행하십시오.")
     if use_voice:
         print("음성 출력 품질을 높이려면 `pip install pyttsx3` 를 권장합니다 (없어도 OS 음성으로 동작).")
     print("이제 `python main.py` 로 시작할 수 있습니다.")
