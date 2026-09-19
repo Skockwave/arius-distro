@@ -1,0 +1,24 @@
+# ARIUS core runs on the Python standard library alone — nothing required here.
+# The following are OPTIONAL, enabling extra backends/features:
+
+# Real conversational reasoning via Anthropic Claude (llm.backend = "anthropic")
+anthropic>=0.40.0
+
+# Voice output (TTS). Without it ARIUS falls back to OS voices (macOS say,
+# Windows System.Speech, Linux espeak-ng) or stays silent.
+# pyttsx3>=2.90
+
+# Voice input (STT) from the microphone (Google Web Speech, supports ko-KR).
+# SpeechRecognition>=3.10
+# pyaudio>=0.2.13
+
+# Neural sentence embeddings for smarter recall (embeddings.backend = "sentence-transformers").
+# The default "hashing" embedder needs nothing.
+# sentence-transformers>=2.2
+
+# Chrome/Chromium rendering for web learning of JavaScript-heavy pages.
+# After installing, run: playwright install chromium
+# playwright>=1.40.0
+
+# Only needed if you prefer a YAML config instead of JSON
+# pyyaml>=6.0

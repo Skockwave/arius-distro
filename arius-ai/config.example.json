@@ -1,0 +1,170 @@
+{
+  "assistant_name": "자비스",
+  "language": "ko",
+  "data_dir": "~/.arius",
+  "default_user": "owner",
+  "llm": {
+    "backend": "echo",
+    "model": "claude-sonnet-5",
+    "api_key_env": "ANTHROPIC_API_KEY",
+    "base_url": "http://localhost:11434",
+    "max_tokens": 1024,
+    "temperature": 0.4
+  },
+  "persona": {
+    "honorific": "님",
+    "tone": "friendly",
+    "style_notes": "따뜻하고 유능하다. 핵심을 놓치지 않으면서도 사람처럼 반응하고, 필요하면 먼저 제안한다.",
+    "emotional": true
+  },
+  "embeddings": {
+    "backend": "hashing",
+    "model": "paraphrase-multilingual-MiniLM-L12-v2",
+    "dim": 512,
+    "base_url": "http://localhost:11434"
+  },
+  "voice": {
+    "enabled": false,
+    "listen": false,
+    "language": "ko-KR",
+    "rate": 180,
+    "voice_name": "",
+    "wake_words": [
+      "자비스",
+      "아리우스"
+    ],
+    "awake_seconds": 20
+  },
+  "agent": {
+    "enabled": false,
+    "autonomy": "supervised",
+    "interval_minutes": 10,
+    "max_steps": 8,
+    "route_chat": true,
+    "notify_discord": false,
+    "policies": [
+      "서버가 꺼지면 다시 켜고 디스코드에 공지해",
+      "디스크 85% 넘으면 알려줘",
+      "서버 로그에 ERROR 가 반복되면 디스코드 운영 채널에 요약해서 알려줘"
+    ],
+    "read_paths": [],
+    "auto_allow": [
+      "discord_announce",
+      "minecraft_say",
+      "minecraft_command",
+      "minecraft_start",
+      "remember"
+    ],
+    "rcon_allow": [
+      "list",
+      "tps",
+      "save-all",
+      "say",
+      "tell",
+      "msg",
+      "whitelist",
+      "banlist",
+      "kick",
+      "ban",
+      "pardon",
+      "op",
+      "deop",
+      "time",
+      "weather",
+      "seed",
+      "version",
+      "plugins"
+    ],
+    "rcon_confirm": [
+      "kick",
+      "ban",
+      "ban-ip",
+      "pardon",
+      "pardon-ip",
+      "op",
+      "deop",
+      "whitelist remove",
+      "whitelist off",
+      "stop",
+      "restart",
+      "difficulty",
+      "gamemode",
+      "gamerule"
+    ],
+    "default_mode": "accurate",
+    "alert_disk_pct": 90,
+    "alert_memory_pct": 92,
+    "alert_cpu_pct": 95,
+    "alert_log_errors": 5,
+    "alert_backup_hours": 48
+  },
+  "minecraft": {
+    "name": "메테노서버",
+    "host": "localhost",
+    "port": 25565,
+    "server_dir": "",
+    "rcon_host": "",
+    "rcon_port": 25575,
+    "rcon_password": "",
+    "rcon_password_env": "ARIUS_RCON_PASSWORD",
+    "distribution_path": "../distribution.json",
+    "start_command": "",
+    "backup_dir": "",
+    "restart_notice_seconds": 300,
+    "restart_notice": "서버가 약 5분 후 재시작됩니다. 안전한 곳으로 이동해 주세요."
+  },
+  "discord": {
+    "webhook_url": "",
+    "webhook_url_env": "ARIUS_DISCORD_WEBHOOK",
+    "bot_token": "",
+    "bot_token_env": "ARIUS_DISCORD_TOKEN",
+    "channel_id": "",
+    "username": "ARIUS",
+    "chat_channels": [],
+    "chat_mention_only": true,
+    "chat_role": "user",
+    "poll_seconds": 4
+  },
+  "desktop": {
+    "programs": {
+      "크롬": "start chrome",
+      "디스코드": "start discord://",
+      "메테노서버 폴더": "explorer C:\\\\Servers\\\\meteno"
+    },
+    "sites": {
+      "메테노 위키": "https://minecraft.wiki",
+      "유튜브": "https://www.youtube.com"
+    },
+    "folders": {
+      "서버 폴더": "C:/Servers/meteno"
+    },
+    "allow_any_url": true,
+    "protected_processes": [
+      "java",
+      "javaw",
+      "explorer",
+      "system",
+      "csrss",
+      "winlogon",
+      "wininit",
+      "lsass",
+      "svchost",
+      "python",
+      "pythonw"
+    ]
+  },
+  "users": [
+    {
+      "username": "owner",
+      "role": "owner",
+      "display_name": "오너",
+      "passphrase_hash": ""
+    },
+    {
+      "username": "friend",
+      "role": "user",
+      "display_name": "친구",
+      "passphrase_hash": ""
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arius-ai"
+version = "0.1.0"
+description = "ARIUS — a JARVIS-style local AI assistant with role-based access control"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.40.0"]
+chrome = ["playwright>=1.40.0"]
+voice = ["pyttsx3>=2.90", "SpeechRecognition>=3.10", "pyaudio>=0.2.13"]
+embeddings = ["sentence-transformers>=2.2"]
+yaml = ["pyyaml>=6.0"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+arius = "arius.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["arius*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
