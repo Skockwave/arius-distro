@@ -22,8 +22,9 @@ from arius.permissions import AuthenticationError, hash_passphrase
 from arius.voice import SpeechToText, TextToSpeech, VoiceConversation
 from arius.agent.heartbeat import Heartbeat
 from arius.agent.loop import AUTONOMY_LEVELS
-from arius.discord import DiscordBot
+from arius.discord import DiscordBot, DiscordError, DiscordWebhook
 from arius.discord_chat import DiscordChat
+from arius.discord_greet import RoleGreeter
 from arius.memory import Memory
 from arius.modes import get_mode, parse_mode
 from arius.permissions import Role, Session, User
@@ -130,6 +131,21 @@ def _make_discord_chat(arius: Arius, on_event) -> DiscordChat | None:
     wake = list(arius.config.voice.wake_words) or [arius.config.assistant_name]
     return DiscordChat(DiscordBot(d.resolved_token), reply, d.chat_channels, wake_words=wake,
                        mention_only=d.chat_mention_only, poll_seconds=d.poll_seconds, on_event=on_event)
+
+
+def _make_role_greeter(arius: Arius, on_event) -> RoleGreeter | None:
+    d = arius.config.discord
+    if not (d.resolved_token and d.greet_guild_id and d.greet_role_id):
+        return None
+    try:
+        webhook = DiscordWebhook(d.greet_webhook_url, d.greet_username) if d.greet_webhook_url else None
+        return RoleGreeter(DiscordBot(d.resolved_token), d.greet_guild_id, d.greet_role_id, webhook=webhook,
+                           channel_id=d.greet_channel_id, template=d.greet_message,
+                           state_path=arius.config.resolved_data_dir / "greeted.json",
+                           poll_seconds=d.greet_poll_seconds, on_event=on_event)
+    except DiscordError as exc:
+        on_event(f"역할 인사 설정 오류: {exc}")
+        return None
 
 
 def _wake_conversation(arius: Arius, voice: "_Voice", on_event) -> None:
@@ -261,6 +277,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     arius.confirm = confirm
     heartbeat: Heartbeat | None = None
     discord_chat: DiscordChat | None = None
+    greeter: RoleGreeter | None = None
 
     def on_mode_change(key: str) -> None:
         nonlocal heartbeat
@@ -289,6 +306,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         discord_chat = _make_discord_chat(arius, event)
         if discord_chat:
             discord_chat.start()
+        greeter = _make_role_greeter(arius, event)
+        if greeter:
+            greeter.start()
 
     while True:
         line: str | None = None
@@ -420,6 +440,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         heartbeat.stop()
     if discord_chat:
         discord_chat.stop()
+    if greeter:
+        greeter.stop()
     arius.close()
     return 0
 
@@ -467,6 +489,9 @@ def cmd_agent(args: argparse.Namespace) -> int:
     chat = _make_discord_chat(arius, event) if (args.discord or cfg.discord.chat_channels) else None
     if chat:
         chat.start()
+    greeter = _make_role_greeter(arius, event)
+    if greeter:
+        greeter.start()
     try:
         if getattr(args, "listen", False):
             voice = _Voice(cfg)
@@ -485,6 +510,8 @@ def cmd_agent(args: argparse.Namespace) -> int:
         hb.stop()
         if chat:
             chat.stop()
+        if greeter:
+            greeter.stop()
         arius.close()
     return 0
 

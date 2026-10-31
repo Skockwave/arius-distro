@@ -223,3 +223,42 @@ def test_find_server_processes_on_windows_reads_parent_batch_folder(monkeypatch)
         (4321, 1500.0, "C:\\Servers\\meteno"),
         (555, 800.0, "C:\\Servers\\old"),
     ]
+
+
+# --- Discord role greeter --------------------------------------------------------------------
+
+
+def test_role_greeter_greets_only_new_role_holders(tmp_path):
+    from arius.discord import DiscordWebhook
+    from arius.discord_greet import RoleGreeter
+
+    trainer = "777"
+    members = [
+        {"user": {"id": "1", "username": "kim"}, "roles": [trainer]},
+        {"user": {"id": "2", "username": "lee"}, "roles": []},
+        {"user": {"id": "3", "username": "bot", "bot": True}, "roles": [trainer]},
+    ]
+    log = []
+
+    def t(method, url, headers, payload):
+        log.append((method, url, payload))
+        if "/members" in url:
+            return 200, members
+        return 200, {"id": "m1"}
+
+    state = tmp_path / "greeted.json"
+    hook = DiscordWebhook("https://discord.com/api/webhooks/1/abc", "E.D.I.T.H.", transport=t)
+    greeter = RoleGreeter(DiscordBot("token", transport=t), "555", trainer, webhook=hook, state_path=state)
+    assert greeter.poll_once() == 0  # first run only records existing holders
+
+    members[1]["roles"] = [trainer]
+    members[1]["nick"] = "이트레이너"
+    assert greeter.poll_once() == 1
+    posts = [p for m, u, p in log if m == "POST"]
+    assert posts[-1]["username"] == "E.D.I.T.H."
+    assert posts[-1]["content"].startswith("<@2>") and "이트레이너" in posts[-1]["content"]
+    assert greeter.poll_once() == 0  # not greeted twice
+
+    # a restart reads the saved holders instead of re-greeting
+    again = RoleGreeter(DiscordBot("token", transport=t), "555", trainer, webhook=hook, state_path=state)
+    assert again.poll_once() == 0

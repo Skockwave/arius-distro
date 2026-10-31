@@ -153,6 +153,14 @@ class DiscordConfig:
     chat_mention_only: bool = True  # only answer when @mentioned or called by name
     chat_role: str = "user"  # RBAC role Discord members get when chatting
     poll_seconds: int = 4  # how often to look for new messages
+    # Role greeter (bot token required): greet members newly given greet_role_id.
+    greet_guild_id: str = ""
+    greet_role_id: str = ""  # e.g. the "트레이너" role
+    greet_webhook_url: str = ""  # posts as greet_username; else the bot posts to greet_channel_id
+    greet_channel_id: str = ""
+    greet_username: str = "E.D.I.T.H."
+    greet_message: str = ""  # {mention} and {name} are filled in; empty = E.D.I.T.H. default
+    greet_poll_seconds: int = 30
 
     @property
     def resolved_webhook(self) -> str:
@@ -371,6 +379,13 @@ def config_to_dict(config: AriusConfig) -> dict[str, Any]:
             "chat_mention_only": config.discord.chat_mention_only,
             "chat_role": config.discord.chat_role,
             "poll_seconds": config.discord.poll_seconds,
+            "greet_guild_id": config.discord.greet_guild_id,
+            "greet_role_id": config.discord.greet_role_id,
+            "greet_webhook_url": config.discord.greet_webhook_url,
+            "greet_channel_id": config.discord.greet_channel_id,
+            "greet_username": config.discord.greet_username,
+            "greet_message": config.discord.greet_message,
+            "greet_poll_seconds": config.discord.greet_poll_seconds,
         },
         "desktop": {
             "programs": dict(config.desktop.programs),

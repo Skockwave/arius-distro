@@ -128,6 +128,18 @@ class DiscordBot:
         msgs = body if isinstance(body, list) else []
         return list(reversed(msgs))
 
+    def members(self, guild_id: str) -> list[dict]:
+        """Every guild member (needs the SERVER MEMBERS INTENT), 1000 per page."""
+        out: list[dict] = []
+        after = "0"
+        while True:
+            body = _check(*self._t("GET", f"{API}/guilds/{guild_id}/members?limit=1000&after={after}", self._h, None), "멤버 조회")
+            page = body if isinstance(body, list) else []
+            out.extend(page)
+            if len(page) < 1000:
+                return out
+            after = str((page[-1].get("user") or {}).get("id", after))
+
     def typing(self, channel_id: str) -> None:
         try:
             self._t("POST", f"{API}/channels/{channel_id}/typing", self._h, None)

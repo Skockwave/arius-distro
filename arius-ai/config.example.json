@@ -123,7 +123,14 @@
     "chat_channels": [],
     "chat_mention_only": true,
     "chat_role": "user",
-    "poll_seconds": 4
+    "poll_seconds": 4,
+    "greet_guild_id": "",
+    "greet_role_id": "",
+    "greet_webhook_url": "",
+    "greet_channel_id": "",
+    "greet_username": "E.D.I.T.H.",
+    "greet_message": "",
+    "greet_poll_seconds": 30
   },
   "desktop": {
     "programs": {

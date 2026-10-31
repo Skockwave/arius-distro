@@ -321,6 +321,15 @@ ARIUS › 최근 로그에 "Can't keep up" 경고가 6회 있어 TPS 저하가 �
 - 디스코드 멤버는 `chat_role`(기본 `user`) 등급으로 대화합니다 — 서버 상태는 물어볼 수 있지만 관리 명령은 못 합니다.
 - 감정 표현은 `persona.emotional` (기본 켜짐). 웹소켓 없이 REST 폴링(기본 4초)이라 추가 패키지가 필요 없습니다.
 
+**역할 인사(E.D.I.T.H.)**: 누군가 특정 역할(예: 트레이너)을 새로 받으면 E.D.I.T.H. 이름으로 그 사람을 멘션해 인사합니다.
+1. Developer Portal → Bot 에서 **SERVER MEMBERS INTENT** 켜기 (멤버 목록 조회에 필요)
+2. `config.json` 의 `discord`: `"greet_guild_id": "서버ID"`, `"greet_role_id": "트레이너 역할ID"`, `"greet_webhook_url": "인사 채널 웹훅"` (웹훅이 없으면 봇이 `greet_channel_id` 채널에 씁니다)
+3. `python main.py run --discord` 또는 데몬 `python main.py agent` 로 실행하면 `greet_poll_seconds`(기본 30초)마다 확인합니다.
+
+- 처음 켤 때 이미 역할이 있던 사람은 인사하지 않고, 받은 사람 목록은 `~/.arius/greeted.json` 에 남아 재시작해도 두 번 인사하지 않습니다. 역할을 잃었다가 다시 받으면 다시 인사합니다.
+- 인사는 웹훅의 `greet_username`(기본 `E.D.I.T.H.`) 이름으로 올라가므로 봇 이름은 그대로 둬도 됩니다.
+- 문구는 `greet_message` 로 바꿀 수 있습니다. `{mention}`, `{name}` 이 채워지며, 비워 두면 이디스 기본 문구를 씁니다.
+
 ## 이름을 부르면 대답하는 음성 대화
 
 이어폰/헤드셋 마이크를 연결하고:
@@ -497,6 +506,7 @@ arius-ai/
 │   ├── minecraft.py         # 서버 핑, RCON, 로컬 서버 프로세스/로그/시작
 │   ├── discord.py           # 웹훅·봇 REST 클라이언트
 │   ├── discord_chat.py      # 채널 대화 모드 (폴링)
+│   ├── discord_greet.py     # 역할을 새로 받은 멤버에게 인사 (E.D.I.T.H.)
 │   ├── sysinfo.py           # CPU/메모리/디스크/프로세스 스냅샷
 │   ├── agent/               # 자율 에이전트: tools(도구·허용 목록) / loop(생각-행동) / heartbeat(정기 점검)
 │   ├── persona.py           # 자비스 스타일 시스템 프롬프트 생성
